@@ -1,0 +1,322 @@
+schema_version: "1.0"
+rule_set_version: "1.0.0"
+threshold_catalog_version: "1.0.0"
+
+rules:
+  - rule_id: INPUT_NOT_HIFI_STOP
+    priority: 100
+    when:
+      all:
+        - metric: input_type
+          op: "!="
+          value: pacbio_hifi
+    decision: STOP
+    action: STOP_UNSUPPORTED_INPUT
+    reason_codes: [INPUT_NOT_PACBIO_HIFI]
+    risk_level: high
+    confidence: 1.0
+    max_candidates: 0
+    evidence_required: [input_type]
+    message: 输入不是 V1 支持的 PacBio HiFi，停止规则驱动调参。
+
+  - rule_id: PLOIDY_OUTSIDE_DIPLOID_STOP
+    priority: 99
+    when:
+      all:
+        - metric: ploidy
+          op: not_null
+        - metric: ploidy
+          op: "!="
+          value: 2
+    decision: STOP
+    action: STOP_OUT_OF_SCOPE_PLOIDY
+    reason_codes: [PLOIDY_NOT_DIPLOID, AUTOMATIC_TUNING_DISABLED]
+    risk_level: high
+    confidence: 0.99
+    max_candidates: 0
+    evidence_required: [ploidy]
+    message: 明确倍性不是 2，V1 不进行自动参数搜索。
+
+  - rule_id: EVALUATION_TOOL_FAILURE_STOP
+    priority: 98
+    when:
+      all:
+        - metric: tool_failure_count
+          op: ">"
+          value: 0
+    decision: STOP
+    action: STOP_EVALUATION_INCOMPLETE
+    reason_codes: [POST_QC_TOOL_FAILURE, EVIDENCE_INCOMPLETE]
+    risk_level: high
+    confidence: 0.99
+    max_candidates: 0
+    evidence_required: [tool_failure_count]
+    message: 至少一个组装后评价工具失败，保留现有指标但禁止自动生成候选。
+
+  - rule_id: COVERAGE_INSUFFICIENT_STOP
+    priority: 95
+    when:
+      all:
+        - metric: estimated_coverage
+          op: "<"
+          threshold: coverage_action_low
+    decision: STOP
+    action: STOP_LOW_COVERAGE_SEARCH
+    reason_codes: [COVERAGE_BELOW_ACTION_THRESHOLD, PARAMETER_SEARCH_UNSAFE]
+    risk_level: high
+    confidence: 0.95
+    max_candidates: 0
+    evidence_required: [estimated_coverage]
+    message: 估计覆盖度低于 15×，停止自动参数搜索，优先补充数据或人工评估。
+
+  - rule_id: MULTI_METRIC_CONFLICT_STOP
+    priority: 90
+    when:
+      any:
+        - all:
+            - metric: busco_duplicated
+              op: ">"
+              threshold: busco_duplicated_action
+            - metric: assembly_size_ratio
+              op: "<="
+              threshold: assembly_size_ratio_warning_high
+        - all:
+            - metric: assembly_size_ratio
+              op: "<"
+              threshold: assembly_size_ratio_action_low
+            - metric: busco_duplicated
+              op: ">"
+              threshold: busco_duplicated_warning
+    decision: STOP
+    action: REQUIRE_HUMAN_REVIEW
+    reason_codes: [ASSEMBLY_METRICS_CONFLICT, AUTOMATIC_ACTION_WITHHELD]
+    risk_level: high
+    confidence: 0.92
+    max_candidates: 0
+    evidence_required: [assembly_size_ratio, busco_duplicated]
+    message: 组装大小与重复信号方向冲突，停止自动决策并要求人工复核。
+
+  - rule_id: CORE_METRICS_MISSING_STOP
+    priority: 85
+    when:
+      all:
+        - metric: core_metrics_complete
+          op: "=="
+          value: false
+    decision: STOP
+    action: STOP_INSUFFICIENT_CORE_METRICS
+    reason_codes: [CORE_ASSEMBLY_METRIC_MISSING, AUTOMATIC_ACTION_WITHHELD]
+    risk_level: high
+    confidence: 0.98
+    max_candidates: 0
+    evidence_required: [core_metrics_complete]
+    message: 缺少组装大小、N50、BUSCO 或 mapping 核心指标，不能安全调参。
+
+  - rule_id: ASM_SIZE_TOO_LARGE_AND_DUPLICATED
+    priority: 80
+    when:
+      all:
+        - metric: assembly_size_ratio
+          op: ">"
+          threshold: assembly_size_ratio_action_high
+        - metric: busco_duplicated
+          op: ">"
+          threshold: busco_duplicated_action
+    decision: RETRY
+    action: PROPOSE_STRONGER_PURGE
+    reason_codes: [ASSEMBLY_SIZE_EXCESSIVE, BUSCO_DUPLICATION_HIGH, PURGE_UNDERCORRECTION_SUSPECTED]
+    risk_level: medium_high
+    confidence: 0.84
+    max_candidates: 1
+    evidence_required: [assembly_size_ratio, busco_duplicated]
+    candidates:
+      - candidate_id: stronger_purge_similarity
+        parameters:
+          purge_similarity:
+            from_threshold: stronger_purge_similarity
+    message: 组装大小和 BUSCO duplicated 同时显著偏高，仅提出一个更严格的 -s 候选。
+
+  - rule_id: ASM_SIZE_LARGE_DUPLICATION_LOW_REVIEW
+    priority: 75
+    when:
+      all:
+        - metric: assembly_size_ratio
+          op: ">"
+          threshold: assembly_size_ratio_action_high
+        - metric: busco_duplicated
+          op: "<="
+          threshold: busco_duplicated_warning
+    decision: STOP
+    action: REVIEW_GENOME_SIZE_ESTIMATE
+    reason_codes: [ASSEMBLY_SIZE_EXCESSIVE, BUSCO_DUPLICATION_NOT_HIGH, GENOME_SIZE_MAY_BE_INACCURATE]
+    risk_level: medium
+    confidence: 0.86
+    max_candidates: 0
+    evidence_required: [assembly_size_ratio, busco_duplicated, expected_genome_size]
+    message: 组装偏大但 BUSCO duplication 不高，优先复核 genome-size，不增强 purge。
+
+  - rule_id: HIGH_N50_STRUCTURAL_ERROR_DISABLE_JOIN
+    priority: 72
+    when:
+      all:
+        - metric: quast_mode
+          op: "=="
+          value: reference_based
+        - metric: contig_n50
+          op: ">="
+          threshold: structural_n50_min
+        - metric: misassemblies_per_100mb
+          op: ">"
+          threshold: misassemblies_per_100mb_action
+    decision: RETRY
+    action: PROPOSE_DISABLE_POST_JOIN
+    reason_codes: [CONTIGUITY_HIGH, REFERENCE_SUPPORTED_STRUCTURAL_ERRORS, POST_JOIN_RISK]
+    risk_level: medium
+    confidence: 0.78
+    max_candidates: 1
+    evidence_required: [quast_mode, contig_n50, quast_misassemblies, misassemblies_per_100mb]
+    candidates:
+      - candidate_id: disable_post_join
+        parameters:
+          disable_post_join:
+            from_threshold: disable_post_join
+    message: N50 较高但参考支持的结构错误率高，提出关闭 post-join 的单一候选。
+
+  - rule_id: HOM_COV_TRUSTED_KMER_CONFLICT
+    priority: 70
+    when:
+      all:
+        - metric: trusted_kmer_peak
+          op: "=="
+          value: true
+        - metric: hifiasm_hom_cov
+          op: not_null
+        - metric: kmer_peak_depth
+          op: not_null
+      any:
+        - metric: hom_cov_peak_ratio
+          op: ">"
+          threshold: hom_cov_conflict_ratio_high
+        - metric: hom_cov_peak_ratio
+          op: "<"
+          threshold: hom_cov_conflict_ratio_low
+    decision: RETRY
+    action: PROPOSE_HOM_COV
+    reason_codes: [HIFIASM_HOM_COV_CONFLICT, TRUSTED_COMPARABLE_HIFI_KMER_PEAK]
+    risk_level: medium_high
+    confidence: 0.82
+    max_candidates: 1
+    evidence_required:
+      - hifiasm_hom_cov
+      - kmer_peak_depth
+      - hom_cov_peak_ratio
+      - kmer_source
+      - genomescope_model_status
+      - kmer_warning_count
+    candidates:
+      - candidate_id: trusted_kmer_hom_cov
+        parameters:
+          hom_cov:
+            from_metric: kmer_peak_depth
+            transform: round_int
+    message: hifiasm hom-cov 与清晰可比的 HiFi k-mer 峰冲突，候选值只取该峰。
+
+  - rule_id: COVERAGE_WARNING_KEEP_BASELINE
+    priority: 65
+    when:
+      all:
+        - metric: estimated_coverage
+          op: ">="
+          threshold: coverage_action_low
+        - metric: estimated_coverage
+          op: "<"
+          threshold: coverage_warning_low
+    decision: BASELINE
+    action: KEEP_BASELINE_LOW_COVERAGE_WARNING
+    reason_codes: [COVERAGE_BELOW_WARNING_THRESHOLD, DEFAULT_PARAMETERS_PREFERRED]
+    risk_level: medium
+    confidence: 0.68
+    max_candidates: 0
+    evidence_required: [estimated_coverage]
+    message: 覆盖度处于 15× 至 20× 警告区间，保留 baseline 且不进行参数搜索。
+
+  - rule_id: GENOME_SIZE_UNKNOWN_KEEP_BASELINE
+    priority: 60
+    when:
+      all:
+        - metric: genome_size_known
+          op: "=="
+          value: false
+    decision: BASELINE
+    action: KEEP_BASELINE_REDUCED_COVERAGE_CONFIDENCE
+    reason_codes: [GENOME_SIZE_UNKNOWN, COVERAGE_CONFIDENCE_REDUCED, DEFAULT_PARAMETERS_PREFERRED]
+    risk_level: medium
+    confidence: 0.55
+    max_candidates: 0
+    evidence_required: [expected_genome_size, estimated_genome_size, genome_size_known]
+    message: genome-size 不可用，覆盖度判断降级并保留 baseline，不据此修改参数。
+
+  - rule_id: INBRED_ALLOW_DISABLE_PURGE
+    priority: 55
+    when:
+      all:
+        - metric: inbred
+          op: "=="
+          value: true
+    decision: RETRY
+    action: PROPOSE_DISABLE_PURGE
+    reason_codes: [SAMPLE_DECLARED_INBRED, PURGE_DISABLE_CANDIDATE_ALLOWED]
+    risk_level: medium
+    confidence: 0.72
+    max_candidates: 1
+    evidence_required: [inbred]
+    candidates:
+      - candidate_id: inbred_disable_purge
+        parameters:
+          purge_level:
+            from_threshold: inbred_purge_level
+    message: 用户明确声明高度近交，仅允许生成一个 -l0 候选，不自动执行。
+
+  - rule_id: METRICS_NORMAL_ACCEPT_BASELINE
+    priority: 20
+    when:
+      all:
+        - metric: assembly_size_ratio
+          op: ">="
+          threshold: assembly_size_ratio_accept_low
+        - metric: assembly_size_ratio
+          op: "<="
+          threshold: assembly_size_ratio_accept_high
+        - metric: busco_complete
+          op: ">="
+          threshold: busco_complete_accept
+        - metric: busco_duplicated
+          op: "<="
+          threshold: busco_duplicated_warning
+        - metric: kmer_completeness
+          op: ">="
+          threshold: kmer_completeness_accept
+        - metric: mapped_read_fraction
+          op: ">="
+          threshold: mapped_read_fraction_accept
+        - metric: tool_failure_count
+          op: "=="
+          value: 0
+    decision: BASELINE
+    action: ACCEPT_DEFAULT_PARAMETERS
+    reason_codes:
+      - ASSEMBLY_SIZE_WITHIN_ACCEPTANCE_RANGE
+      - BUSCO_COMPLETE_HIGH
+      - NO_STRONG_DUPLICATION_SIGNAL
+      - KMER_COMPLETENESS_ACCEPTABLE
+      - READ_MAPPING_ACCEPTABLE
+    risk_level: low
+    confidence: 0.90
+    max_candidates: 0
+    evidence_required:
+      - assembly_size_ratio
+      - busco_complete
+      - busco_duplicated
+      - kmer_completeness
+      - mapped_read_fraction
+    message: 多维指标均在保守接受范围内，接受 baseline 默认参数。

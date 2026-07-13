@@ -1,0 +1,141 @@
+schema_version: "1.0"
+catalog_version: "1.0.0"
+
+sources:
+  HIFI_AGENT_EXPERT_CONSENSUS:
+    title: HiFi Agent V1 conservative assembly review standard
+    version: "1.0.0"
+    kind: expert_consensus
+    locator: docs/stage8_expert_rules.md
+    notes: >-
+      Conservative V1 thresholds selected for single-sample diploid eukaryotic HiFi projects.
+      They are intentionally broad and require concordant evidence before parameter changes.
+  HIFI_AGENT_PROJECT_SPEC:
+    title: HiFi Agent V1 Project Plan
+    version: "1.0.0"
+    kind: project_specification
+    locator: HiFi_Agent_V1_Project_Plan.md#阶段-8规则引擎-v0
+    notes: Defines the Stage 8 rule inventory, safety boundary, and whitelist requirement.
+  HIFIASM_LOCAL_HELP:
+    title: hifiasm command-line help
+    version: "0.25.0-r726"
+    kind: tool_documentation
+    locator: hifiasm -h
+    notes: >-
+      Confirms -l purge levels, -s similarity semantics, --hom-cov, and -u post-join behavior.
+
+thresholds:
+  coverage_warning_low:
+    value: 20.0
+    level: warning
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: Coverage below 20x is flagged as potentially fragile but does not alone stop V1.
+  coverage_action_low:
+    value: 15.0
+    level: action
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: Coverage below 15x is insufficient for bounded automatic parameter search.
+  assembly_size_ratio_warning_high:
+    value: 1.15
+    level: warning
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: Assembly size over 115% of the trusted estimate deserves review.
+  assembly_size_ratio_action_high:
+    value: 1.25
+    level: action
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: Above 125%, only concordant duplication evidence may authorize purge adjustment.
+  assembly_size_ratio_action_low:
+    value: 0.80
+    level: action
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: Below 80%, completeness and duplication signals are treated as potentially conflicting.
+  assembly_size_ratio_accept_low:
+    value: 0.85
+    level: acceptance
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: Lower bound for accepting baseline size without a size warning.
+  assembly_size_ratio_accept_high:
+    value: 1.15
+    level: acceptance
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: Upper bound for accepting baseline size without a size warning.
+  busco_duplicated_warning:
+    value: 5.0
+    level: warning
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: Duplicated BUSCO above 5% is noted but never changes parameters by itself.
+  busco_duplicated_action:
+    value: 10.0
+    level: action
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: Duplicated BUSCO above 10% is strong only when assembly size is also excessive.
+  busco_complete_accept:
+    value: 95.0
+    level: acceptance
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: Baseline completeness acceptance floor for the generic V1 rule set.
+  kmer_completeness_accept:
+    value: 90.0
+    level: acceptance
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: Conservative k-mer completeness acceptance floor when the metric is available.
+  mapped_read_fraction_accept:
+    value: 0.95
+    level: acceptance
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: At least 95% of filtered HiFi reads should map for normal baseline acceptance.
+  hom_cov_conflict_ratio_high:
+    value: 1.50
+    level: action
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: hifiasm hom-cov over 1.5x a trusted independent peak is a material conflict.
+  hom_cov_conflict_ratio_low:
+    value: 0.6666667
+    level: action
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: hifiasm hom-cov below two-thirds of a trusted independent peak is a conflict.
+  structural_n50_min:
+    value: 1000000
+    level: action
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: A 1 Mb N50 prevents low contiguity alone from masquerading as post-join damage.
+  misassemblies_per_100mb_action:
+    value: 10.0
+    level: action
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: More than 10 reference-supported misassemblies per 100 Mb is structural evidence.
+  stronger_purge_similarity:
+    value: 0.50
+    level: action
+    source_id: HIFI_AGENT_EXPERT_CONSENSUS
+    source_version: "1.0.0"
+    description: One conservative step below the -l3 default 0.55; allowed only with concordant evidence.
+  inbred_purge_level:
+    value: 0
+    level: action
+    source_id: HIFIASM_LOCAL_HELP
+    source_version: "0.25.0-r726"
+    description: hifiasm -l0 disables purging and is considered only when the user declares inbred=true.
+  disable_post_join:
+    value: true
+    level: action
+    source_id: HIFIASM_LOCAL_HELP
+    source_version: "0.25.0-r726"
+    description: hifiasm -u0 disables post-join when reference-supported structural errors are high.

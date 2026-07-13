@@ -10,6 +10,7 @@ from hifi_agent.constants import APP_NAME, __version__
 from hifi_agent.exceptions import HiFiAgentError, NotImplementedCommandError
 from hifi_agent.executors.nextflow import run_phase3_workflow, run_post_qc_workflow
 from hifi_agent.logging import configure_logging, get_console
+from hifi_agent.rules import load_default_rule_engine, load_rule_context, write_rule_decision
 
 app = typer.Typer(
     name=APP_NAME,
@@ -106,6 +107,31 @@ def evaluate(
     console.print(
         f"Assembly metrics: {result.outdir / '03_post_qc/baseline/assembly_metrics.json'}"
     )
+
+
+@app.command()
+def decide(
+    run_dir: Annotated[Path, typer.Argument(help="Existing evaluated run directory.")],
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", help="Optional rule-decision JSON path."),
+    ] = None,
+) -> None:
+    """Evaluate the audited Stage 8 expert rules without an LLM."""
+    resolved_run_dir = run_dir.resolve()
+    decision_path = output or (
+        resolved_run_dir / "04_decisions" / "baseline" / "rule_decision.json"
+    )
+    try:
+        context = load_rule_context(resolved_run_dir)
+        decision = load_default_rule_engine().evaluate(context)
+        written = write_rule_decision(decision, decision_path)
+    except HiFiAgentError as exc:
+        abort_with_error(exc)
+    console = get_console()
+    console.print(f"[green]Rule decision: {decision.decision}[/green]")
+    console.print(f"Action: {decision.action}")
+    console.print(f"Decision record: {written}")
 
 
 @app.command()

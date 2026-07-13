@@ -311,3 +311,16 @@ hifi-agent evaluate results/<sample_id>
 ├── merqury/
 └── mapping/
 ```
+
+## 第 8 阶段规则决策
+
+阶段 8 使用版本化 YAML 专家规则和阈值，不依赖 LLM：
+
+```text
+hifi-agent decide results/<sample_id>
+```
+
+结果写入 `04_decisions/baseline/rule_decision.json`，只会产生 `BASELINE`、`STOP` 或
+`RETRY`。候选参数严格限制为 `purge_level`、`purge_similarity`、`hom_cov` 和
+`disable_post_join`。规则、阈值与冲突策略见
+[`docs/stage8_expert_rules.md`](docs/stage8_expert_rules.md)。

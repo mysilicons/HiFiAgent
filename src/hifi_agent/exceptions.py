@@ -32,3 +32,15 @@ class ToolExecutionError(HiFiAgentError):
     """Raised when an external tool exits unsuccessfully or is unavailable."""
 
     exit_code = ExitCode.TOOL_EXECUTION_FAILED
+
+
+class RuleConfigurationError(HiFiAgentError):
+    """Raised when expert rules or thresholds violate the audited schema."""
+
+    exit_code = ExitCode.INPUT_VALIDATION_FAILED
+
+
+class RuleEvaluationError(HiFiAgentError):
+    """Raised when a rule decision cannot be produced from supplied run artifacts."""
+
+    exit_code = ExitCode.INSUFFICIENT_EVIDENCE

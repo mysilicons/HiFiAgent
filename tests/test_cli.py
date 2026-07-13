@@ -7,6 +7,8 @@ import hifi_agent.cli
 from hifi_agent.cli import app
 from hifi_agent.constants import ExitCode
 from hifi_agent.executors.nextflow import NextflowRunResult
+from hifi_agent.rules.context import RuleContext
+from hifi_agent.rules.models import RuleDecision
 
 runner = CliRunner()
 
@@ -20,6 +22,7 @@ def test_help_lists_initial_commands() -> None:
     assert "run" in result.output
     assert "evaluate" in result.output
     assert "report" in result.output
+    assert "decide" in result.output
 
 
 def test_version_option() -> None:
@@ -58,3 +61,50 @@ def test_evaluate_runs_post_qc_entry(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     assert result.exit_code == ExitCode.OK
     assert "Post-assembly evaluation completed" in result.output
+
+
+def test_decide_writes_rule_decision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    context = RuleContext()
+    decision = RuleDecision(
+        decision_id="D-TEST",
+        rule_set_version="test",
+        threshold_catalog_version="test",
+        decision="BASELINE",
+        action="ACCEPT_DEFAULT_PARAMETERS",
+        matched_rule_ids=["NORMAL"],
+        controlling_rule_ids=["NORMAL"],
+        reason_codes=["METRICS_NORMAL"],
+        evidence={"assembly_size_ratio": 1.0},
+        candidates=[],
+        confidence=0.9,
+        risk_level="low",
+        conflicts=[],
+        human_readable_explanation="Normal metrics.",
+    )
+
+    class FakeEngine:
+        def evaluate(self, observed: RuleContext) -> RuleDecision:
+            assert observed is context
+            return decision
+
+    monkeypatch.setattr(hifi_agent.cli, "load_rule_context", lambda path: context)
+    monkeypatch.setattr(hifi_agent.cli, "load_default_rule_engine", FakeEngine)
+
+    result = runner.invoke(app, ["decide", str(run_dir)])
+
+    output = run_dir / "04_decisions" / "baseline" / "rule_decision.json"
+    assert result.exit_code == ExitCode.OK
+    assert "Rule decision: BASELINE" in result.output
+    assert output.is_file()
+    assert RuleDecision.model_validate_json(output.read_text()) == decision
+
+
+def test_decide_missing_run_artifacts_uses_insufficient_evidence_exit_code(
+    tmp_path: Path,
+) -> None:
+    result = runner.invoke(app, ["decide", str(tmp_path)])
+
+    assert result.exit_code == ExitCode.INSUFFICIENT_EVIDENCE
+    assert "Rule context artifact(s) missing" in result.output
