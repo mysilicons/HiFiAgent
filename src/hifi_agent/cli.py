@@ -11,6 +11,7 @@ from hifi_agent.constants import APP_NAME, __version__
 from hifi_agent.exceptions import HiFiAgentError, NotImplementedCommandError
 from hifi_agent.executors.nextflow import run_phase3_workflow, run_post_qc_workflow
 from hifi_agent.logging import configure_logging, get_console
+from hifi_agent.rag import DEFAULT_INDEX_PATH, build_knowledge_index, explain_run
 from hifi_agent.rules import load_default_rule_engine, load_rule_context, write_rule_decision
 
 app = typer.Typer(
@@ -160,6 +161,56 @@ def run_agent(
     console.print(f"State: {state.state}")
     console.print(f"State file: {controller.store.state_path}")
     console.print(f"Decision trace: {controller.store.trace_path}")
+
+
+@app.command("rag-index")
+def rag_index(
+    output: Annotated[
+        Path,
+        typer.Option("--output", help="Local full-text index JSON path."),
+    ] = DEFAULT_INDEX_PATH,
+) -> None:
+    """Build the local provenance-preserving Stage 10 knowledge index."""
+    try:
+        index = build_knowledge_index(output_path=output.resolve())
+    except HiFiAgentError as exc:
+        abort_with_error(exc)
+    console = get_console()
+    console.print("[green]Knowledge index built.[/green]")
+    console.print(f"Sources: {len(index.sources)}")
+    console.print(f"Chunks: {len(index.chunks)}")
+    console.print(f"Index: {output.resolve()}")
+
+
+@app.command("explain")
+def explain_decision(
+    run_dir: Annotated[Path, typer.Argument(help="Existing Stage 8/9 run directory.")],
+    index: Annotated[
+        Path,
+        typer.Option("--index", help="Local RAG index JSON path."),
+    ] = DEFAULT_INDEX_PATH,
+    llm: Annotated[
+        bool,
+        typer.Option("--llm/--no-llm", help="Enable or disable DeepSeek explanation."),
+    ] = True,
+) -> None:
+    """Produce a constrained rules+RAG explanation and safety comparison."""
+    resolved_run_dir = run_dir.resolve()
+    try:
+        bundle = explain_run(
+            resolved_run_dir,
+            index_path=index.resolve(),
+            enable_llm=llm,
+        )
+    except HiFiAgentError as exc:
+        abort_with_error(exc)
+    output_dir = resolved_run_dir / "04_decisions" / "baseline"
+    console = get_console()
+    console.print(f"[green]Explanation status: {bundle.llm_status}[/green]")
+    console.print(f"Recommended action: {bundle.explanation.recommended_action}")
+    console.print(f"Retrieved sources: {len({hit.source_id for hit in bundle.retrieval_evidence})}")
+    console.print(f"Explanation: {output_dir / 'explanation.json'}")
+    console.print(f"RAG comparison: {output_dir / 'rag_comparison.json'}")
 
 
 @app.command()

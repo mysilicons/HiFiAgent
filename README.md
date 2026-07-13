@@ -347,3 +347,19 @@ hifi-agent agent results/<sample_id> --resume
 解释为生物学质量退化。状态与预算细节见
 [`docs/stage9_agent_controller.md`](docs/stage9_agent_controller.md)。
 严格验收证据见 [`docs/stage9_acceptance.md`](docs/stage9_acceptance.md)。
+
+## 第 10 阶段 RAG 与受约束解释
+
+构建 `document/` 本地知识索引，并对阶段 8 决策生成可追溯解释：
+
+```text
+hifi-agent rag-index
+hifi-agent explain results/<sample_id> --no-llm
+hifi-agent explain results/<sample_id> --llm
+```
+
+LLM 模式默认使用 `DEEPSEEK_API_KEY` 和 OpenAI 兼容的 `deepseek-v4-pro`。规则 decision、
+参数候选和阶段 9 预算始终不可修改；模型输出需通过 Schema、来源、参数、置信度和科学单位
+校验。输出包括 `explanation.json/.md`、`rag_comparison.json` 和带 source/chunk ID 的
+`rag_decision_trace.jsonl`。详见 [`docs/stage10_rag_llm.md`](docs/stage10_rag_llm.md) 与
+[`docs/stage10_acceptance.md`](docs/stage10_acceptance.md)。

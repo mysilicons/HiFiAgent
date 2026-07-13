@@ -54,3 +54,15 @@ class AgentStateError(HiFiAgentError):
 
 class IllegalStateTransitionError(AgentStateError):
     """Raised when the controller attempts a transition outside the state graph."""
+
+
+class LLMProviderError(HiFiAgentError):
+    """Raised when the optional LLM provider cannot return a usable response."""
+
+    exit_code = ExitCode.INSUFFICIENT_EVIDENCE
+
+
+class LLMSafetyError(HiFiAgentError):
+    """Raised when structured LLM output violates deterministic safety constraints."""
+
+    exit_code = ExitCode.INSUFFICIENT_EVIDENCE

@@ -1,0 +1,133 @@
+schema_version: "1.0"
+catalog_version: "1.0.0"
+retrieved_at: "2026-07-13"
+
+sources:
+  - source_id: hifiasm_docs_index
+    title: Hifiasm documentation index
+    file_path: document/hifiasm_docs/index.md
+    url: https://github.com/chhylp123/hifiasm/blob/master/docs/index.md
+    content_kind: official_documentation
+    tool: hifiasm
+    tool_version: 0.25.0-r726
+    scope: v1
+  - source_id: hifiasm_faq
+    title: Hifiasm FAQ
+    file_path: document/hifiasm_docs/faq.md
+    url: https://github.com/chhylp123/hifiasm/blob/master/docs/faq.md
+    content_kind: official_documentation
+    tool: hifiasm
+    tool_version: 0.25.0-r726
+    scope: v1
+  - source_id: hifiasm_output
+    title: Interpreting hifiasm output
+    file_path: document/hifiasm_docs/interpreting-output.md
+    url: https://github.com/chhylp123/hifiasm/blob/master/docs/interpreting-output.md
+    content_kind: official_documentation
+    tool: hifiasm
+    tool_version: 0.25.0-r726
+    scope: v1
+  - source_id: hifiasm_parameters
+    title: Hifiasm parameter reference
+    file_path: document/hifiasm_docs/parameter-reference.md
+    url: https://github.com/chhylp123/hifiasm/blob/master/docs/parameter-reference.md
+    content_kind: official_documentation
+    tool: hifiasm
+    tool_version: 0.25.0-r726
+    scope: v1
+  - source_id: hifiasm_hifi_only
+    title: Hifiasm HiFi-only assembly
+    file_path: document/hifiasm_docs/pa-assembly.md
+    url: https://github.com/chhylp123/hifiasm/blob/master/docs/pa-assembly.md
+    content_kind: official_documentation
+    tool: hifiasm
+    tool_version: 0.25.0-r726
+    scope: v1
+  - source_id: hifiasm_hic
+    title: Hifiasm Hi-C integrated assembly
+    file_path: document/hifiasm_docs/hic-assembly.md
+    url: https://github.com/chhylp123/hifiasm/blob/master/docs/hic-assembly.md
+    content_kind: official_documentation
+    tool: hifiasm
+    tool_version: 0.25.0-r726
+    scope: out_of_scope_reference
+  - source_id: hifiasm_trio
+    title: Hifiasm trio-binning assembly
+    file_path: document/hifiasm_docs/trio-assembly.md
+    url: https://github.com/chhylp123/hifiasm/blob/master/docs/trio-assembly.md
+    content_kind: official_documentation
+    tool: hifiasm
+    tool_version: 0.25.0-r726
+    scope: out_of_scope_reference
+  - source_id: busco_manual
+    title: BUSCO v6.1.0 user guide
+    file_path: document/BUSCO_manual.html
+    url: https://busco.ezlab.org/busco_userguide.html
+    content_kind: official_documentation
+    tool: BUSCO
+    tool_version: 6.1.0
+    scope: v1
+  - source_id: busco_paper
+    title: BUSCO Update paper
+    file_path: document/BUSCO_paper.pdf
+    url: https://doi.org/10.1093/molbev/msab199
+    content_kind: peer_reviewed_paper
+    tool: BUSCO
+    tool_version: publication
+    scope: v1
+  - source_id: quast_manual
+    title: QUAST 5.3.0 manual
+    file_path: document/QUAST_manual.html
+    url: https://quast.sourceforge.net/docs/manual.html
+    content_kind: official_documentation
+    tool: QUAST
+    tool_version: 5.3.0
+    scope: v1
+  - source_id: quast_paper
+    title: QUAST quality assessment paper
+    file_path: document/QUAST_paper.pdf
+    url: https://doi.org/10.1093/bioinformatics/btt086
+    content_kind: peer_reviewed_paper
+    tool: QUAST
+    tool_version: publication
+    scope: v1
+  - source_id: merqury_readme
+    title: Merqury official repository README
+    file_path: document/merqury_README.md
+    url: https://github.com/marbl/merqury
+    content_kind: official_documentation
+    tool: Merqury
+    tool_version: repository_snapshot
+    scope: v1
+  - source_id: merqury_paper
+    title: Merqury reference-free assembly evaluation paper
+    file_path: document/merqury_paper.pdf
+    url: https://doi.org/10.1186/s13059-020-02134-9
+    content_kind: peer_reviewed_paper
+    tool: Merqury
+    tool_version: publication
+    scope: v1
+  - source_id: genomescope_readme
+    title: GenomeScope 2.0 official repository README
+    file_path: document/genomescopeREADME.md
+    url: https://github.com/tbenavi1/genomescope2.0
+    content_kind: official_documentation
+    tool: GenomeScope
+    tool_version: "2.0"
+    scope: v1
+  - source_id: genomescope_paper
+    title: GenomeScope 2.0 paper
+    file_path: document/genomescope_paper.pdf
+    url: https://doi.org/10.1038/s41467-020-14998-3
+    content_kind: peer_reviewed_paper
+    tool: GenomeScope
+    tool_version: publication
+    scope: v1
+  - source_id: hifi_agent_rules
+    title: HiFi Agent Stage 8 expert rule standard
+    file_path: docs/stage8_expert_rules.md
+    url: local://docs/stage8_expert_rules.md
+    content_kind: project_rule_documentation
+    tool: HiFiAgent
+    tool_version: "1.0.0"
+    scope: v1

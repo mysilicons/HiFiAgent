@@ -27,4 +27,5 @@ dependencies:
   - ruff
   - mypy
   - pip:
+      - pypdf>=5,<7
       - types-PyYAML

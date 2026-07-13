@@ -28,6 +28,7 @@ dag.*
 results/
 logs/
 data/
+knowledge/index.json
 *.fastq
 *.fastq.gz
 *.fq

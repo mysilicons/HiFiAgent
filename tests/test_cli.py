@@ -25,6 +25,8 @@ def test_help_lists_initial_commands() -> None:
     assert "report" in result.output
     assert "decide" in result.output
     assert "agent" in result.output
+    assert "rag-index" in result.output
+    assert "explain" in result.output
 
 
 def test_version_option() -> None:
@@ -144,3 +146,48 @@ def test_agent_command_runs_recoverable_controller(
     assert "Agent terminal outcome: STOP_UNCERTAIN" in result.output
     assert observed["run_dir"] == run_dir.resolve()
     assert observed["resume"] is True
+
+
+def test_rag_index_command_reports_source_and_chunk_counts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "index.json"
+    monkeypatch.setattr(
+        hifi_agent.cli,
+        "build_knowledge_index",
+        lambda **kwargs: SimpleNamespace(sources=[1, 2], chunks=[1, 2, 3]),
+    )
+
+    result = runner.invoke(app, ["rag-index", "--output", str(output)])
+
+    assert result.exit_code == ExitCode.OK
+    assert "Sources: 2" in result.output
+    assert "Chunks: 3" in result.output
+
+
+def test_explain_command_supports_llm_disabled_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    observed: dict[str, object] = {}
+
+    def fake_explain(path: Path, **kwargs: object) -> SimpleNamespace:
+        observed["path"] = path
+        observed.update(kwargs)
+        return SimpleNamespace(
+            llm_status="DISABLED",
+            explanation=SimpleNamespace(recommended_action="STOP_AND_REVIEW"),
+            retrieval_evidence=[SimpleNamespace(source_id="hifiasm_faq")],
+        )
+
+    monkeypatch.setattr(hifi_agent.cli, "explain_run", fake_explain)
+
+    result = runner.invoke(app, ["explain", str(run_dir), "--no-llm"])
+
+    assert result.exit_code == ExitCode.OK
+    assert "Explanation status: DISABLED" in result.output
+    assert observed["path"] == run_dir.resolve()
+    assert observed["enable_llm"] is False
