@@ -1,0 +1,82 @@
+# Dataset registry for HiFi Agent benchmarks.
+# Large data must be downloaded outside Git and referenced by local path or accession.
+
+version: 0.1.0
+updated: "2026-06-25"
+
+datasets:
+  - id: synthetic_micro_hifi
+    role: tiny_public_test
+    status: selected_for_stage_0
+    description: >
+      A tiny synthetic PacBio HiFi-like FASTQ generated from a small artificial
+      eukaryotic-style reference. This is intended for parser, schema, and
+      workflow smoke tests, not biological benchmarking.
+    source_type: generated_fixture
+    public_shareable: true
+    expected_size: tiny
+    target_use:
+      - input validation
+      - seqkit parser tests
+      - NanoPlot parser tests
+      - Nextflow smoke tests
+    generation_plan:
+      reference_size_bp: 50000
+      read_count: 200
+      mean_read_length_bp: 12000
+      expected_qscore: 30
+      random_seed: 20260625
+    limitations:
+      - Not a biological truth set.
+      - Not suitable for hifiasm quality claims.
+      - Not suitable for BUSCO, QUAST, or Merqury biological interpretation.
+
+  - id: giab_hg002_pacbio_hifi
+    role: real_benchmark
+    status: candidate_needs_download_validation
+    description: >
+      Genome in a Bottle HG002/NA24385 PacBio HiFi data. This is the preferred
+      real benchmark candidate because it is public, deeply characterized, and
+      widely used for human genome benchmarking.
+    source_type: public_archive
+    organism: Homo sapiens
+    sample_id: HG002
+    expected_genome_size_bp: 3100000000
+    ploidy: 2
+    inbred: false
+    busco_lineage: primates_odb12
+    kmer_source_plan: same_data_advisory_or_independent_if_short_reads_added
+    target_use:
+      - baseline hifiasm behavior
+      - post-QC parser validation
+      - conservative rule-engine benchmark
+      - reporting demonstration
+    local_storage_policy:
+      commit_to_git: false
+      store_under: /data/gw/code/HiFiAgent_data/benchmarks/giab_hg002_pacbio_hifi
+    download_notes:
+      - Verify exact read accession or GIAB FTP path before download.
+      - Record checksum, source URL, and download date in run metadata.
+      - Use a downsampled subset only for routine local smoke tests.
+    limitations:
+      - Human HiFi datasets are large and require substantial compute.
+      - Full benchmark execution may exceed routine development time.
+      - Source accession must be rechecked before automated download scripts are added.
+
+benchmark_scenarios:
+  - id: normal_hifi
+    dataset: giab_hg002_pacbio_hifi
+    expected_behavior: accept_baseline_or_keep_default_without_unnecessary_retry
+  - id: low_coverage
+    dataset: giab_hg002_pacbio_hifi
+    perturbation: downsample_reads
+    expected_behavior: warn_or_stop_without_blind_parameter_search
+  - id: assembly_size_too_large
+    dataset: synthetic_metric_fixture
+    expected_behavior: propose_whitelisted_purge_candidate_only_if_duplication_signal_agrees
+  - id: hom_cov_conflict
+    dataset: synthetic_metric_fixture
+    expected_behavior: propose_hom_cov_candidate_only_with_trusted_coverage_peak
+  - id: conflicting_metrics
+    dataset: synthetic_metric_fixture
+    expected_behavior: stop_uncertain_or_require_manual_review

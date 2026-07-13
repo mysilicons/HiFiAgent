@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hifi-agent"
+version = "0.1.0"
+description = "Constrained PacBio HiFi genome assembly assistant."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+authors = [
+  { name = "HiFi Agent contributors" },
+]
+dependencies = [
+  "pydantic>=2",
+  "pyyaml>=6",
+  "rich>=13",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.10",
+  "pytest>=8",
+  "ruff>=0.5",
+  "types-PyYAML",
+]
+
+[project.scripts]
+hifi-agent = "hifi_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "B",
+  "C4",
+  "E",
+  "F",
+  "I",
+  "N",
+  "PT",
+  "RUF",
+  "UP",
+  "W",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+pretty = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["typer.*"]
+disallow_untyped_decorators = false

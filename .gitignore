@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Conda and local envs
+.conda/
+.venv/
+venv/
+
+# Nextflow
+.nextflow/
+.nextflow.log*
+work/
+timeline.html
+trace.txt
+report.html
+dag.*
+
+# Project outputs and large data
+results/
+logs/
+data/
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.bam
+*.cram
+*.sam
+*.gfa
+*.fa
+*.fasta
+*.fna
+*.mmi
+*.bt2
+*.bin
+
+# OS and editor
+.DS_Store
+*.swp
+*.swo
