@@ -44,3 +44,13 @@ class RuleEvaluationError(HiFiAgentError):
     """Raised when a rule decision cannot be produced from supplied run artifacts."""
 
     exit_code = ExitCode.INSUFFICIENT_EVIDENCE
+
+
+class AgentStateError(HiFiAgentError):
+    """Raised when persisted Agent state is missing, corrupt, or incompatible."""
+
+    exit_code = ExitCode.INTERNAL_ERROR
+
+
+class IllegalStateTransitionError(AgentStateError):
+    """Raised when the controller attempts a transition outside the state graph."""

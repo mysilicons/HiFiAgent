@@ -5,6 +5,7 @@ from typing import Annotated, NoReturn
 
 import typer
 
+from hifi_agent.agent import AgentController, ExistingRunAgentTools
 from hifi_agent.config import validate_config_file
 from hifi_agent.constants import APP_NAME, __version__
 from hifi_agent.exceptions import HiFiAgentError, NotImplementedCommandError
@@ -132,6 +133,33 @@ def decide(
     console.print(f"[green]Rule decision: {decision.decision}[/green]")
     console.print(f"Action: {decision.action}")
     console.print(f"Decision record: {written}")
+
+
+@app.command("agent")
+def run_agent(
+    run_dir: Annotated[Path, typer.Argument(help="Existing HiFi Agent run directory.")],
+    resume: Annotated[
+        bool,
+        typer.Option("--resume", help="Resume from 05_agent/agent_state.json."),
+    ] = False,
+) -> None:
+    """Run or resume the explicit Stage 9 controller without an LLM."""
+    resolved_run_dir = run_dir.resolve()
+    config_path = resolved_run_dir / "00_metadata" / "resolved_config.yaml"
+    try:
+        controller = AgentController(
+            resolved_run_dir,
+            config_path,
+            ExistingRunAgentTools(resolved_run_dir),
+        )
+        state = controller.run(resume=resume)
+    except HiFiAgentError as exc:
+        abort_with_error(exc)
+    console = get_console()
+    console.print(f"[green]Agent terminal outcome: {state.terminal_outcome}[/green]")
+    console.print(f"State: {state.state}")
+    console.print(f"State file: {controller.store.state_path}")
+    console.print(f"Decision trace: {controller.store.trace_path}")
 
 
 @app.command()

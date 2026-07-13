@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
@@ -23,6 +24,7 @@ def test_help_lists_initial_commands() -> None:
     assert "evaluate" in result.output
     assert "report" in result.output
     assert "decide" in result.output
+    assert "agent" in result.output
 
 
 def test_version_option() -> None:
@@ -108,3 +110,37 @@ def test_decide_missing_run_artifacts_uses_insufficient_evidence_exit_code(
 
     assert result.exit_code == ExitCode.INSUFFICIENT_EVIDENCE
     assert "Rule context artifact(s) missing" in result.output
+
+
+def test_agent_command_runs_recoverable_controller(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    observed: dict[str, object] = {}
+
+    class FakeController:
+        def __init__(self, observed_run_dir: Path, config: Path, tools: object) -> None:
+            observed["run_dir"] = observed_run_dir
+            observed["config"] = config
+            observed["tools"] = tools
+            self.store = SimpleNamespace(
+                state_path=observed_run_dir / "05_agent" / "agent_state.json",
+                trace_path=observed_run_dir / "05_agent" / "decision_trace.jsonl",
+            )
+
+        def run(self, *, resume: bool = False) -> SimpleNamespace:
+            observed["resume"] = resume
+            return SimpleNamespace(terminal_outcome="STOP_UNCERTAIN", state="REPORT")
+
+    fake_tools = object()
+    monkeypatch.setattr(hifi_agent.cli, "AgentController", FakeController)
+    monkeypatch.setattr(hifi_agent.cli, "ExistingRunAgentTools", lambda path: fake_tools)
+
+    result = runner.invoke(app, ["agent", str(run_dir), "--resume"])
+
+    assert result.exit_code == ExitCode.OK
+    assert "Agent terminal outcome: STOP_UNCERTAIN" in result.output
+    assert observed["run_dir"] == run_dir.resolve()
+    assert observed["resume"] is True

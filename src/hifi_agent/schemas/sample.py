@@ -44,6 +44,9 @@ class AgentConfig(BaseModel):
 
     max_retry_rounds: int = Field(default=1, ge=0, le=2)
     max_candidates_per_round: int = Field(default=2, ge=1, le=2)
+    max_tool_retries: int = Field(default=1, ge=0, le=3)
+    max_cpu_hours: float = Field(default=10_000.0, ge=0.0)
+    max_walltime_hours: float = Field(default=168.0, ge=0.0)
     objective: Literal["balanced", "contiguity", "completeness", "conservative"] = "balanced"
 
 

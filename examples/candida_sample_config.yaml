@@ -15,6 +15,9 @@ resources:
 agent:
   max_retry_rounds: 1
   max_candidates_per_round: 2
+  max_tool_retries: 1
+  max_cpu_hours: 10000
+  max_walltime_hours: 168
   objective: balanced
 kmer:
   k: 21

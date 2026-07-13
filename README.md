@@ -324,3 +324,26 @@ hifi-agent decide results/<sample_id>
 `RETRY`。候选参数严格限制为 `purge_level`、`purge_similarity`、`hom_cov` 和
 `disable_post_join`。规则、阈值与冲突策略见
 [`docs/stage8_expert_rules.md`](docs/stage8_expert_rules.md)。
+
+## 第 9 阶段 Agent 控制器
+
+对已完成阶段 1～8 的运行目录启动显式、无 LLM 控制器：
+
+```text
+hifi-agent agent results/<sample_id>
+hifi-agent agent results/<sample_id> --resume
+```
+
+状态快照、逐转移审计日志和执行摘要分别写入：
+
+```text
+05_agent/agent_state.json
+05_agent/decision_trace.jsonl
+05_agent/agent_summary.json
+```
+
+控制器分别限制参数优化轮数、每轮候选数、工具失败重试、CPU-hour 和 walltime；参数
+指纹防止相同候选重复运行。工具失败只进入工具重试或 `FAILED_TOOL_EXECUTION`，不会被
+解释为生物学质量退化。状态与预算细节见
+[`docs/stage9_agent_controller.md`](docs/stage9_agent_controller.md)。
+严格验收证据见 [`docs/stage9_acceptance.md`](docs/stage9_acceptance.md)。

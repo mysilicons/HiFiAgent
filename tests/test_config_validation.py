@@ -186,6 +186,27 @@ def test_candidate_budget_above_v1_limit_fails(tmp_path: Path) -> None:
     assert_invalid(tmp_path, data, "agent.max_candidates_per_round")
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("max_tool_retries", 4),
+        ("max_cpu_hours", -1),
+        ("max_walltime_hours", -1),
+    ],
+)
+def test_agent_compute_and_tool_budgets_are_bounded(
+    tmp_path: Path,
+    field: str,
+    value: int,
+) -> None:
+    data = base_config(tmp_path)
+    agent = data["agent"]
+    assert isinstance(agent, dict)
+    agent[field] = value
+
+    assert_invalid(tmp_path, data, f"agent.{field}")
+
+
 def test_kmer_low_coverage_threshold_out_of_range_fails(tmp_path: Path) -> None:
     data = base_config(tmp_path)
     data["kmer"] = {"k": 21, "low_coverage_peak_threshold": 0}
