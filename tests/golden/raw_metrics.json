@@ -1,0 +1,25 @@
+{
+  "estimated_coverage": 2.0,
+  "estimated_genome_size": 50,
+  "estimated_genome_size_source": "expected_genome_size",
+  "gc_percent": 40.0,
+  "genomescope_model_status": "not_available",
+  "input_status": "PASS",
+  "kmer_peak_depth": 5,
+  "kmer_source": "same_data_advisory",
+  "mean_qscore": 30.0,
+  "mean_read_length": 50.0,
+  "read_count": 2,
+  "read_n50": 60,
+  "sample_id": "golden_sample",
+  "tool_outputs": {
+    "kmer_metrics": "kmer_metrics.json",
+    "nanostats": "NanoStats.txt",
+    "seqkit_stats": "seqkit_stats.tsv"
+  },
+  "total_bases": 100,
+  "warnings": [
+    "GENOMESCOPE_MODEL_NOT_AVAILABLE",
+    "KMER_LOW_COVERAGE_PEAK"
+  ]
+}

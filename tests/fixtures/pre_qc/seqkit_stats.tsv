@@ -1,0 +1,2 @@
+file	format	type	num_seqs	sum_len	min_len	avg_len	max_len	Q1	Q2	Q3	sum_gap	N50	N50_num	Q20(%)	Q30(%)	AvgQual	GC(%)	sum_n
+reads.fastq	FASTQ	DNA	2	100	40	50.0	60	40	50	60	0	60	1	100	100	30	40	0

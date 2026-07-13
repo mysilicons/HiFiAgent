@@ -22,6 +22,7 @@ LOG_DIR="${OUTDIR}/logs/phase6_validation"
 CONFIG_FILE="${LOG_DIR}/candida_phase6_config.yaml"
 NF_CONFIG_FILE="${LOG_DIR}/phase6_nextflow_override.config"
 READS_MANIFEST="${METADATA_DIR}/hifi_reads.list"
+BIN_REUSE_MANIFEST="${METADATA_DIR}/hifiasm_bin_reuse_candidates.tsv"
 DRIVER_LOG="${LOG_DIR}/phase6_driver.log"
 NF_STDOUT_LOG="${LOG_DIR}/nextflow.stdout.log"
 NF_STDERR_LOG="${LOG_DIR}/nextflow.stderr.log"
@@ -135,6 +136,15 @@ profiles {
 NFCONFIG
 
 printf '%s\n' "${READS}" > "${READS_MANIFEST}"
+printf 'path\tsha256\tbytes\n' > "${BIN_REUSE_MANIFEST}"
+if [[ -d "${OUTDIR}/02_assembly/baseline/bins" ]]; then
+  for bin_path in "${OUTDIR}/02_assembly/baseline/bins/${SAMPLE_ID}.baseline"*.bin; do
+    [[ -f "${bin_path}" ]] || continue
+    printf '%s\t%s\t%s\n' \
+      "${bin_path}" "$(sha256sum "${bin_path}" | awk '{print $1}')" "$(stat -c %s "${bin_path}")" \
+      >> "${BIN_REUSE_MANIFEST}"
+  done
+fi
 
 CONDA_PREFIX_PATH="$(conda run -n "${CONDA_ENV}" python -c 'import os; print(os.environ["CONDA_PREFIX"])' | tail -n 1)"
 export PATH="${CONDA_PREFIX_PATH}/bin:${PATH}"
@@ -171,6 +181,8 @@ COMMAND=(
   -resume
   --sample_id "${SAMPLE_ID}"
   --reads_manifest "${READS_MANIFEST}"
+  --validation_receipt "${METADATA_DIR}/validation_receipt.json"
+  --bin_reuse_manifest "${BIN_REUSE_MANIFEST}"
   --outdir "${OUTDIR}"
   --expected_genome_size "${EXPECTED_GENOME_SIZE}"
   --kmer_k "${KMER_K}"

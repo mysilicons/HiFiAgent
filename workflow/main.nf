@@ -1,6 +1,8 @@
 nextflow.enable.dsl = 2
 
 def sampleId = params.sample_id as String
+def validationReceipt = params.validation_receipt ? params.validation_receipt as String : ''
+def binReuseManifest = params.bin_reuse_manifest ? params.bin_reuse_manifest as String : ''
 def readsPattern = params.reads
 def readsManifest = params.reads_manifest
 def kmerReadsManifest = params.kmer_reads_manifest ?: readsManifest
@@ -15,9 +17,16 @@ def buscoLineage = params.busco_lineage ? params.busco_lineage as String : ''
 def buscoDownloadPath = params.busco_download_path as String
 def buscoTimeoutMinutes = params.busco_timeout_minutes ?: 240
 def coverageWindowSize = params.coverage_window_size ?: 10000
+def mappingMinReadLength = params.mapping_min_read_length ?: 1000
+def mappingMinMeanQscore = params.mapping_min_mean_qscore ?: 20.0
+def kmerLowCoveragePeakThreshold = params.kmer_low_coverage_peak_threshold ?: 10.0
 
 if (!sampleId) {
     error "Missing required parameter: --sample_id"
+}
+
+if (!validationReceipt || !new File(validationReceipt).isFile()) {
+    error "Missing validated input receipt: --validation_receipt"
 }
 
 if (!(sampleId ==~ /^[A-Za-z0-9_-]+$/)) {
@@ -238,6 +247,7 @@ process KMER_METRICS {
         --genomescope-summary "${genomescope_summary}" \\
         --expected-genome-size "${expectedGenomeSize}" \\
         --kmer-source "${kmerSource}" \\
+        --low-coverage-peak-threshold "${kmerLowCoveragePeakThreshold}" \\
         --output kmer_metrics.json
     """
 }
@@ -279,7 +289,7 @@ process HIFIASM_BASELINE {
         overwrite: true
 
     input:
-    tuple val(sample_id), path(reads), path(raw_metrics)
+    tuple val(sample_id), path(reads), path(raw_metrics), path(bin_reuse_manifest)
 
     output:
     tuple val(sample_id), path('metadata/assembly_manifest.json'), path('fasta/baseline.primary.fa'), emit: baseline
@@ -317,14 +327,18 @@ process HIFIASM_BASELINE {
     "\$HIFIASM_BIN" --version > metadata/hifiasm.version.txt
     "\$GFATOOLS_BIN" version > metadata/gfatools.version.txt 2>&1 || true
 
-    published_bins="${params.outdir}/02_assembly/baseline/bins"
     printf 'path\\tstatus\\n' > metadata/reused_bins.tsv
-    if [ -d "\$published_bins" ]; then
-        find "\$published_bins" -maxdepth 1 -type f -name "\${PREFIX}*.bin" -print | sort | while read -r bin; do
-            cp "\$bin" .
-            printf '%s\\treused\\n' "\$bin" >> metadata/reused_bins.tsv
-        done
-    fi
+    while IFS=\$'\\t' read -r bin expected_sha expected_bytes; do
+        [ "\$bin" != "path" ] || continue
+        [ -f "\$bin" ] || { printf 'Missing reuse candidate: %s\\n' "\$bin" >&2; exit 2; }
+        observed_sha=\$(sha256sum "\$bin" | awk '{print \$1}')
+        [ "\$observed_sha" = "\$expected_sha" ] || {
+            printf 'Checksum mismatch for reuse candidate: %s\\n' "\$bin" >&2
+            exit 2
+        }
+        cp "\$bin" .
+        printf '%s\\treused\\n' "\$bin" >> metadata/reused_bins.tsv
+    done < "${bin_reuse_manifest}"
 
     printf '%s -o %s -t %s %s\\n' "\$HIFIASM_BIN" "\$PREFIX" "${task.cpus}" "${reads}" > metadata/hifiasm_command.txt
 
@@ -368,6 +382,7 @@ process HIFIASM_BASELINE {
         --stdout logs/hifiasm.stdout \\
         --stderr logs/hifiasm.stderr \\
         --time-report logs/hifiasm.time.txt \\
+        --reused-bins-record metadata/reused_bins.tsv \\
         --output metadata/assembly_manifest.json
     """
 }
@@ -474,8 +489,13 @@ process BUSCO_POST_QC {
     fi
 
     LINEAGE_ARGS=()
+    OFFLINE_ARGS=()
     if [ -n "${busco_lineage_value}" ]; then
         LINEAGE_ARGS=(-l "${busco_lineage_value}")
+        if [ -d "${busco_download_path_value}/${busco_lineage_value}" ] || \
+           [ -d "${busco_download_path_value}/lineages/${busco_lineage_value}" ]; then
+            OFFLINE_ARGS=(--offline)
+        fi
     else
         LINEAGE_ARGS=(--auto-lineage-euk)
     fi
@@ -493,6 +513,7 @@ process BUSCO_POST_QC {
             --out_path "\$PWD/busco" \
             --download_path "${busco_download_path_value}" \
             --opt-out-run-stats \
+            "\${OFFLINE_ARGS[@]}" \
             "\${LINEAGE_ARGS[@]}" \
             > busco.stdout 2> busco.stderr
         STATUS=\$?
@@ -507,6 +528,7 @@ process BUSCO_POST_QC {
         --root busco \
         --status "\$STATUS" \
         --lineage "${busco_lineage_value}" \
+        --download-path "${busco_download_path_value}" \
         --version-file busco.version.txt \
         --output busco_metrics.json
     """
@@ -637,16 +659,28 @@ process MAPPING_POST_QC {
     fi
     touch mapping/minimap2.version.txt mapping/samtools.version.txt mapping/coverage.version.txt
 
-    STATUS=127
     set +e
-    if [ -n "\$MINIMAP2_BIN" ] && [ -n "\$SAMTOOLS_BIN" ] && [ -n "\$COVERAGE_BIN" ]; then
+    PYTHONPATH="${pythonPath}" python -m hifi_agent.workflow_tools filter-hifi-reads \
+        --input ${reads} \
+        --output mapping/filtered_reads.fastq.gz \
+        --summary mapping/filter_summary.json \
+        --min-read-length "${mappingMinReadLength}" \
+        --min-mean-qscore "${mappingMinMeanQscore}" \
+        > mapping/filter.stdout 2> mapping/filter.stderr
+    FILTER_STATUS=\$?
+    set -e
+    [ -f mapping/filter_summary.json ] || printf '{}\n' > mapping/filter_summary.json
+
+    STATUS=\$FILTER_STATUS
+    set +e
+    if [ "\$STATUS" -eq 0 ] && [ -n "\$MINIMAP2_BIN" ] && [ -n "\$SAMTOOLS_BIN" ] && [ -n "\$COVERAGE_BIN" ]; then
         set -o pipefail
         MAPPING_THREADS="${task.cpus}"
         MINIMAP_THREADS=\$((MAPPING_THREADS * 3 / 4))
         SAMTOOLS_THREADS=\$((MAPPING_THREADS - MINIMAP_THREADS))
         [ "\$MINIMAP_THREADS" -ge 1 ] || MINIMAP_THREADS=1
         [ "\$SAMTOOLS_THREADS" -ge 1 ] || SAMTOOLS_THREADS=1
-        "\$MINIMAP2_BIN" -ax map-hifi -t "\$MINIMAP_THREADS" mapping/assembly.fa ${reads} \
+        "\$MINIMAP2_BIN" -ax map-hifi -t "\$MINIMAP_THREADS" mapping/assembly.fa mapping/filtered_reads.fastq.gz \
             2> mapping/minimap2.stderr \
             | "\$SAMTOOLS_BIN" sort -@ "\$SAMTOOLS_THREADS" -o mapping/alignment.bam - \
             2> mapping/samtools_sort.stderr
@@ -670,7 +704,8 @@ process MAPPING_POST_QC {
             "\$SAMTOOLS_BIN" bedcov mapping/windows.bed mapping/alignment.bam \
                 > mapping/coverage_windows.tsv || STATUS=\$?
         fi
-    else
+    elif [ "\$STATUS" -eq 0 ]; then
+        STATUS=127
         printf 'Required mapping or coverage executable not found\n' > mapping/mapping.stderr
     fi
     set -e
@@ -684,6 +719,7 @@ process MAPPING_POST_QC {
         --minimap2-version mapping/minimap2.version.txt \
         --samtools-version mapping/samtools.version.txt \
         --coverage-tool-version mapping/coverage.version.txt \
+        --filter-summary mapping/filter_summary.json \
         --output mapping/mapping_metrics.json
     cp mapping/mapping_metrics.json mapping_metrics.json
     """
@@ -820,6 +856,30 @@ workflow POST_QC_ONLY {
     ASSEMBLY_METRICS(combined_ch)
 }
 
+workflow HIFIASM_REUSE_ONLY {
+    if (!readsManifest || !params.raw_metrics || !binReuseManifest) {
+        error "HIFIASM_REUSE_ONLY requires --reads_manifest, --raw_metrics, and --bin_reuse_manifest"
+    }
+
+    assembly_reads_ch = Channel
+        .fromPath(readsManifest, checkIfExists: true)
+        .splitText()
+        .map { read -> read.trim() }
+        .filter { read -> read }
+        .map { read -> file(read) }
+        .collect()
+        .map { reads -> tuple(sampleId, reads) }
+    raw_metrics_ch = Channel.of(tuple(sampleId, file(params.raw_metrics)))
+    bin_reuse_ch = Channel.of(tuple(sampleId, file(binReuseManifest)))
+    assembly_input_ch = assembly_reads_ch
+        .join(raw_metrics_ch)
+        .join(bin_reuse_ch)
+        .map { sample_id, reads, raw_metrics, bin_reuse_manifest ->
+            tuple(sample_id, reads, raw_metrics, bin_reuse_manifest)
+        }
+    HIFIASM_BASELINE(assembly_input_ch)
+}
+
 workflow {
     if (readsManifest) {
         reads_ch = Channel
@@ -869,6 +929,9 @@ workflow {
     RAW_METRICS(pre_qc_ch)
 
     if (runAssembly) {
+        if (!binReuseManifest || !new File(binReuseManifest).isFile()) {
+            error "Assembly requires --bin_reuse_manifest from the validated CLI"
+        }
         if (readsManifest) {
             assembly_reads_ch = Channel
                 .fromPath(readsManifest, checkIfExists: true)
@@ -885,10 +948,12 @@ workflow {
                 .map { reads -> tuple(sampleId, reads) }
         }
 
+        bin_reuse_ch = Channel.of(tuple(sampleId, file(binReuseManifest)))
         assembly_input_ch = assembly_reads_ch
             .join(RAW_METRICS.out.raw)
-            .map { sample_id, reads, raw_metrics ->
-                tuple(sample_id, reads, raw_metrics)
+            .join(bin_reuse_ch)
+            .map { sample_id, reads, raw_metrics, bin_reuse_manifest ->
+                tuple(sample_id, reads, raw_metrics, bin_reuse_manifest)
         }
         HIFIASM_BASELINE(assembly_input_ch)
 

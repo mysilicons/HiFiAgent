@@ -29,6 +29,9 @@ class AssemblyMetrics(BaseModel):
     kmer_qv: float | None = None
     kmer_completeness: float | None = None
     mapped_read_fraction: float | None = None
+    mapping_input_read_count: int | None = None
+    mapping_retained_read_count: int | None = None
+    mapping_retained_read_fraction: float | None = None
     coverage_mean: float | None = None
     coverage_median: float | None = None
     coverage_cv: float | None = None
@@ -39,4 +42,5 @@ class AssemblyMetrics(BaseModel):
     metric_limitations: list[str] = Field(default_factory=list)
     metric_classes: dict[str, Literal["fact", "derived"]] = Field(default_factory=dict)
     tool_versions: dict[str, str | None] = Field(default_factory=dict)
+    tool_metadata: dict[str, object] = Field(default_factory=dict)
     source_files: dict[str, str] = Field(default_factory=dict)

@@ -18,3 +18,8 @@ agent:
   objective: balanced
 kmer:
   k: 21
+  low_coverage_peak_threshold: 10.0
+mapping_qc:
+  min_read_length: 1000
+  min_mean_qscore: 20.0
+  coverage_window_size: 10000

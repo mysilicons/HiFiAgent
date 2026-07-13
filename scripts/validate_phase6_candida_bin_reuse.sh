@@ -19,27 +19,26 @@ OUTDIR="${OUTDIR:-${ROOT_DIR}/results/Candida_albicans_phase6_bin_reuse}"
 THREADS="${THREADS:-480}"
 MEMORY_GB="${MEMORY_GB:-960}"
 EXPECTED_GENOME_SIZE="${EXPECTED_GENOME_SIZE:-14500000}"
-KMER_K="${KMER_K:-21}"
 CONDA_ENV="${CONDA_ENV:-hifiAgent}"
 CONDA_BIN="${CONDA_BIN:-}"
 
 SOURCE_BINS_DIR="${SOURCE_OUTDIR}/02_assembly/baseline/bins"
 METADATA_DIR="${OUTDIR}/00_metadata"
 BASELINE_DIR="${OUTDIR}/02_assembly/baseline"
-PRESEEDED_BINS_DIR="${BASELINE_DIR}/bins"
 LOG_DIR="${OUTDIR}/logs/phase6_bin_reuse_validation"
 CONFIG_FILE="${LOG_DIR}/candida_phase6_bin_reuse_config.yaml"
 NF_CONFIG_FILE="${LOG_DIR}/phase6_bin_reuse_nextflow_override.config"
 READS_MANIFEST="${METADATA_DIR}/hifi_reads.list"
+BIN_REUSE_MANIFEST="${METADATA_DIR}/hifiasm_bin_reuse_candidates.tsv"
 DRIVER_LOG="${LOG_DIR}/phase6_bin_reuse_driver.log"
 NF_STDOUT_LOG="${LOG_DIR}/nextflow.stdout.log"
 NF_STDERR_LOG="${LOG_DIR}/nextflow.stderr.log"
 COMMAND_FILE="${LOG_DIR}/nextflow_command.txt"
 ENV_FILE="${LOG_DIR}/phase6_bin_reuse_environment.txt"
 CHECKLIST="${LOG_DIR}/phase6_bin_reuse_acceptance_checklist.tsv"
-PRESEEDED_MANIFEST="${LOG_DIR}/preseeded_bins.tsv"
+DECLARED_BINS_RECORD="${LOG_DIR}/declared_source_bins.tsv"
 
-mkdir -p "${METADATA_DIR}" "${LOG_DIR}" "${PRESEEDED_BINS_DIR}"
+mkdir -p "${METADATA_DIR}" "${LOG_DIR}"
 exec >> "${DRIVER_LOG}" 2>&1
 
 timestamp() {
@@ -103,22 +102,11 @@ require_file "${SOURCE_BINS_DIR}/${SAMPLE_ID}.baseline.ec.bin"
 require_file "${SOURCE_BINS_DIR}/${SAMPLE_ID}.baseline.ovlp.reverse.bin"
 require_file "${SOURCE_BINS_DIR}/${SAMPLE_ID}.baseline.ovlp.source.bin"
 
-printf 'source\tpreseeded\tmethod\n' > "${PRESEEDED_MANIFEST}"
+printf 'source\tmethod\n' > "${DECLARED_BINS_RECORD}"
 for bin_path in "${SOURCE_BINS_DIR}/${SAMPLE_ID}.baseline"*.bin; do
-  target="${PRESEEDED_BINS_DIR}/$(basename "${bin_path}")"
-  if [[ ! -e "${target}" ]]; then
-    if ln "${bin_path}" "${target}" 2>/dev/null; then
-      method="hardlink"
-    else
-      cp "${bin_path}" "${target}"
-      method="copy"
-    fi
-  else
-    method="already_present"
-  fi
-  printf '%s\t%s\t%s\n' "${bin_path}" "${target}" "${method}" >> "${PRESEEDED_MANIFEST}"
+  printf '%s\tdeclared_workflow_input\n' "${bin_path}" >> "${DECLARED_BINS_RECORD}"
 done
-echo "[$(timestamp)] Preseeded hifiasm bin files: ${PRESEEDED_MANIFEST}"
+echo "[$(timestamp)] Declared source hifiasm bin files: ${DECLARED_BINS_RECORD}"
 
 cat > "${CONFIG_FILE}" <<YAML
 sample_id: ${SAMPLE_ID}
@@ -182,6 +170,13 @@ NFCONFIG
 echo "[$(timestamp)] Wrote Nextflow override config: ${NF_CONFIG_FILE}"
 
 printf '%s\n' "${READS}" > "${READS_MANIFEST}"
+printf 'path\tsha256\tbytes\n' > "${BIN_REUSE_MANIFEST}"
+for bin_path in "${SOURCE_BINS_DIR}/${SAMPLE_ID}.baseline"*.bin; do
+  [[ -f "${bin_path}" ]] || continue
+  printf '%s\t%s\t%s\n' \
+    "${bin_path}" "$(sha256sum "${bin_path}" | awk '{print $1}')" "$(stat -c %s "${bin_path}")" \
+    >> "${BIN_REUSE_MANIFEST}"
+done
 echo "[$(timestamp)] Wrote reads manifest: ${READS_MANIFEST}"
 
 echo "[$(timestamp)] Resolving conda executable"
@@ -220,13 +215,14 @@ COMMAND=(
   run "${ROOT_DIR}/workflow/main.nf"
   -c "${NF_CONFIG_FILE}"
   -profile phase6_bin_reuse
+  -entry HIFIASM_REUSE_ONLY
   --sample_id "${SAMPLE_ID}"
   --reads_manifest "${READS_MANIFEST}"
+  --validation_receipt "${METADATA_DIR}/validation_receipt.json"
+  --bin_reuse_manifest "${BIN_REUSE_MANIFEST}"
   --outdir "${OUTDIR}"
   --expected_genome_size "${EXPECTED_GENOME_SIZE}"
-  --kmer_k "${KMER_K}"
-  --run_assembly true
-  --run_post_qc false
+  --raw_metrics "${SOURCE_OUTDIR}/01_pre_qc/raw_metrics.json"
 )
 
 printf '%q ' "${COMMAND[@]}" > "${COMMAND_FILE}"
@@ -257,6 +253,11 @@ reused_count="$(awk 'NR > 1 && $2 == "reused" { count++ } END { print count + 0 
 if [[ "${reused_count}" -lt 3 ]]; then
   echo "[$(timestamp)] ERROR: Expected at least 3 reused hifiasm bin files, observed ${reused_count}"
   exit 3
+fi
+
+if ! grep -q 'loaded corrected reads and overlaps from disk' "${BASELINE_DIR}/logs/hifiasm.stderr"; then
+  echo "[$(timestamp)] ERROR: hifiasm did not report loading corrected reads and overlaps" >&2
+  exit 4
 fi
 
 echo "[$(timestamp)] Phase 6 bin reuse acceptance check passed"

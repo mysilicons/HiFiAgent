@@ -1,9 +1,14 @@
+import gzip
 import json
 from pathlib import Path
 
 import pytest
 
-from hifi_agent.parsers.busco import parse_busco_summary
+from hifi_agent.parsers.busco import (
+    infer_busco_lineage,
+    parse_busco_dataset_metadata,
+    parse_busco_summary,
+)
 from hifi_agent.parsers.mapping import parse_mapped_fraction, parse_window_coverage
 from hifi_agent.parsers.merqury import parse_merqury_metrics
 from hifi_agent.parsers.quast import parse_quast_report
@@ -49,6 +54,28 @@ def test_parse_busco_keeps_complete_and_duplicated_separate(tmp_path: Path) -> N
     }
 
 
+def test_busco_auto_lineage_and_dataset_version_are_recorded(tmp_path: Path) -> None:
+    summary = tmp_path / "short_summary.specific.saccharomycetes_odb12.baseline.txt"
+    summary.write_text("C:98.2%[S:94.1%,D:4.1%],F:0.8%,M:1.0%,n:2137\n")
+    download_path = tmp_path / "downloads"
+    dataset = download_path / "saccharomycetes_odb12"
+    dataset.mkdir(parents=True)
+    (dataset / "dataset.cfg").write_text(
+        "creation_date=2024-01-08\nnumber_of_buscos=2137\n"
+        "orthodb_version=12.1\ndataset_version=02\n"
+    )
+
+    lineage = infer_busco_lineage(summary)
+    metadata = parse_busco_dataset_metadata(download_path, lineage)
+
+    assert lineage == "saccharomycetes_odb12"
+    assert metadata["odb_version"] == 12
+    assert metadata["creation_date"] == "2024-01-08"
+    assert metadata["number_of_buscos"] == 2137
+    assert metadata["orthodb_version"] == "12.1"
+    assert metadata["dataset_version"] == "02"
+
+
 def test_parse_merqury_qv_and_completeness(tmp_path: Path) -> None:
     qv = tmp_path / "baseline.qv"
     qv.write_text("baseline\t4016996\t22428196\t20.29\t0.009\n")
@@ -85,6 +112,42 @@ def test_zero_median_coverage_uses_mean_for_anomaly_thresholds(tmp_path: Path) -
     assert coverage["median"] == 0
     assert coverage["low_window_fraction"] == pytest.approx(2 / 3)
     assert coverage["high_window_fraction"] == pytest.approx(1 / 3)
+
+
+def test_hifi_filter_applies_length_and_mean_qscore_thresholds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reads = tmp_path / "reads.fastq"
+    reads.write_text("@keep\nACGT\n+\nIIII\n@short\nAC\n+\nII\n@lowq\nACGT\n+\n!!!!\n")
+    output = tmp_path / "filtered.fastq.gz"
+    summary = tmp_path / "filter.json"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "workflow_tools",
+            "filter-hifi-reads",
+            "--input",
+            str(reads),
+            "--output",
+            str(output),
+            "--summary",
+            str(summary),
+            "--min-read-length",
+            "4",
+            "--min-mean-qscore",
+            "20",
+        ],
+    )
+
+    workflow_tools_main()
+
+    with gzip.open(output, "rt") as handle:
+        assert handle.read() == "@keep\nACGT\n+\nIIII\n"
+    values = json.loads(summary.read_text())
+    assert values["input_read_count"] == 3
+    assert values["retained_read_count"] == 1
+    assert values["retained_read_fraction"] == pytest.approx(1 / 3)
 
 
 def test_assembly_metrics_aggregates_failures_and_nulls(
@@ -156,3 +219,19 @@ def test_assembly_metrics_aggregates_failures_and_nulls(
     assert metrics.busco_complete is None
     assert metrics.tool_failures == ["busco"]
     assert "MERQURY_SAME_HIFI_DATA_NOT_INDEPENDENT" in metrics.metric_limitations
+    expected_classified_fields = {
+        name
+        for name in AssemblyMetrics.model_fields
+        if name
+        not in {
+            "schema_version",
+            "run_id",
+            "tool_failures",
+            "metric_limitations",
+            "metric_classes",
+            "tool_versions",
+            "tool_metadata",
+            "source_files",
+        }
+    }
+    assert set(metrics.metric_classes) == expected_classified_fields

@@ -42,6 +42,7 @@ def test_phase3_main_declares_minimal_processes() -> None:
     assert "gfatools" in main_nf
     assert "*.bin" in main_nf
     assert "--auto-lineage-euk" in main_nf
+    assert "OFFLINE_ARGS=(--offline)" in main_nf
     assert "map-hifi" in main_nf
     assert "coverage_windows.tsv" in main_nf
     assert "timeout --signal=TERM" in main_nf
@@ -66,3 +67,5 @@ def test_large_local_host_resource_policy() -> None:
     assert "withName: NANOPLOT" in base_config
     assert "withName: MERQURY_POST_QC" in base_config
     assert "withName: MAPPING_POST_QC" in base_config
+    assert "withName: QUAST" in base_config
+    assert "withName: BUSCO_POST_QC" in base_config

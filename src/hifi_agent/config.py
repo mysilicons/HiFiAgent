@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,6 +47,7 @@ class ConfigValidationResult:
     metadata_dir: Path
     resolved_config: Path
     input_checksums: Path
+    validation_receipt: Path
 
 
 def validate_config_file(
@@ -68,17 +70,25 @@ def validate_config_file(
     metadata_dir = resolved_config.outdir / "00_metadata"
     resolved_config_path = metadata_dir / "resolved_config.yaml"
     input_checksums_path = metadata_dir / "input_checksums.tsv"
+    validation_receipt_path = metadata_dir / "validation_receipt.json"
 
     if write_outputs:
         metadata_dir.mkdir(parents=True, exist_ok=True)
         _write_resolved_config(resolved_config, resolved_config_path)
         _write_input_checksums(resolved_config, input_checksums_path)
+        _write_validation_receipt(
+            resolved_config,
+            resolved_config_path,
+            input_checksums_path,
+            validation_receipt_path,
+        )
 
     return ConfigValidationResult(
         config=resolved_config,
         metadata_dir=metadata_dir,
         resolved_config=resolved_config_path,
         input_checksums=input_checksums_path,
+        validation_receipt=validation_receipt_path,
     )
 
 
@@ -101,6 +111,63 @@ def validate_sample_inputs(config: SampleConfig) -> None:
             _validate_fastq_first_record(read_path, field_name="kmer_reads")
     if config.reference_genome is not None:
         _validate_existing_file(config.reference_genome, field_name="reference_genome")
+
+
+def verify_validation_receipt(config: SampleConfig, receipt_path: Path) -> None:
+    """Verify that the validation receipt still matches its metadata artifacts."""
+    if not receipt_path.is_file():
+        raise InputValidationError(f"Validated workflow receipt is missing: {receipt_path}")
+    try:
+        data = json.loads(receipt_path.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        raise InputValidationError(
+            f"Validation receipt is unreadable: {receipt_path}: {exc}"
+        ) from exc
+    if not isinstance(data, dict):
+        raise InputValidationError(f"Validation receipt must contain a JSON object: {receipt_path}")
+    if data.get("status") != "PASS" or data.get("sample_id") != config.sample_id:
+        raise InputValidationError(
+            f"Validation receipt does not authorize sample `{config.sample_id}`: {receipt_path}"
+        )
+    artifacts = (
+        ("resolved_config", "resolved_config_sha256"),
+        ("input_checksums", "input_checksums_sha256"),
+    )
+    for path_key, digest_key in artifacts:
+        artifact_value = data.get(path_key)
+        expected_digest = data.get(digest_key)
+        if not isinstance(artifact_value, str) or not isinstance(expected_digest, str):
+            raise InputValidationError(f"Validation receipt field `{path_key}` is invalid")
+        artifact = Path(artifact_value)
+        if not artifact.is_file() or _sha256(artifact) != expected_digest:
+            raise InputValidationError(
+                f"Validation receipt artifact `{path_key}` is missing or changed: {artifact}"
+            )
+
+
+def verify_recorded_input_checksums(input_checksums_path: Path) -> None:
+    """Re-hash recorded inputs before evaluating an existing run directory."""
+    if not input_checksums_path.is_file():
+        raise InputValidationError(f"Input checksum manifest is missing: {input_checksums_path}")
+    lines = input_checksums_path.read_text().splitlines()
+    if not lines or lines[0] != "role\tpath\tsha256\tbytes":
+        raise InputValidationError(
+            f"Input checksum manifest header is invalid: {input_checksums_path}"
+        )
+    for line_number, line in enumerate(lines[1:], start=2):
+        parts = line.split("\t")
+        if len(parts) != 4:
+            raise InputValidationError(
+                f"Input checksum manifest line {line_number} is invalid: {input_checksums_path}"
+            )
+        _role, path_value, expected_digest, expected_size = parts
+        path = Path(path_value)
+        if (
+            not path.is_file()
+            or str(path.stat().st_size) != expected_size
+            or _sha256(path) != expected_digest
+        ):
+            raise InputValidationError(f"Validated input is missing or changed: {path}")
 
 
 def _load_yaml_mapping(config_path: Path) -> Mapping[str, Any]:
@@ -267,6 +334,27 @@ def _write_input_checksums(config: SampleConfig, output_path: Path) -> None:
         for row in rows:
             handle.write("\t".join(row))
             handle.write("\n")
+
+
+def _write_validation_receipt(
+    config: SampleConfig,
+    resolved_config_path: Path,
+    input_checksums_path: Path,
+    output_path: Path,
+) -> None:
+    """Write a deterministic receipt proving validation outputs were materialized."""
+    data = {
+        "schema_version": "1.0",
+        "status": "PASS",
+        "sample_id": config.sample_id,
+        "resolved_config": str(resolved_config_path),
+        "resolved_config_sha256": _sha256(resolved_config_path),
+        "input_checksums": str(input_checksums_path),
+        "input_checksums_sha256": _sha256(input_checksums_path),
+    }
+    with output_path.open("w") as handle:
+        json.dump(data, handle, indent=2, sort_keys=True)
+        handle.write("\n")
 
 
 def _iter_checksum_inputs(config: SampleConfig) -> Iterable[tuple[str, Path]]:

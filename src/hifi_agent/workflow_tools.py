@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import shutil
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
-from hifi_agent.parsers.busco import find_busco_summary, parse_busco_summary
+from hifi_agent.parsers.busco import (
+    find_busco_summary,
+    infer_busco_lineage,
+    parse_busco_dataset_metadata,
+    parse_busco_summary,
+)
 from hifi_agent.parsers.genomescope import (
     parse_genomescope_report,
     parse_genomescope_stdout,
@@ -45,6 +51,7 @@ def main() -> None:
     kmer_metrics.add_argument("--genomescope-summary", type=Path, required=True)
     kmer_metrics.add_argument("--expected-genome-size", default="")
     kmer_metrics.add_argument("--kmer-source", default=KMER_SOURCE_SAME_DATA)
+    kmer_metrics.add_argument("--low-coverage-peak-threshold", type=float, default=10.0)
     kmer_metrics.add_argument("--output", type=Path, required=True)
     kmer_metrics.set_defaults(func=_kmer_metrics)
 
@@ -57,6 +64,14 @@ def main() -> None:
     raw_metrics.add_argument("--output", type=Path, required=True)
     raw_metrics.set_defaults(func=_raw_metrics)
 
+    filter_reads = subparsers.add_parser("filter-hifi-reads")
+    filter_reads.add_argument("--input", type=Path, nargs="+", required=True)
+    filter_reads.add_argument("--output", type=Path, required=True)
+    filter_reads.add_argument("--summary", type=Path, required=True)
+    filter_reads.add_argument("--min-read-length", type=int, required=True)
+    filter_reads.add_argument("--min-mean-qscore", type=float, required=True)
+    filter_reads.set_defaults(func=_filter_hifi_reads)
+
     hifiasm_manifest = subparsers.add_parser("hifiasm-manifest")
     hifiasm_manifest.add_argument("--sample-id", required=True)
     hifiasm_manifest.add_argument("--run-id", required=True)
@@ -65,6 +80,7 @@ def main() -> None:
     hifiasm_manifest.add_argument("--stdout", type=Path, required=True)
     hifiasm_manifest.add_argument("--stderr", type=Path, required=True)
     hifiasm_manifest.add_argument("--time-report", type=Path, required=True)
+    hifiasm_manifest.add_argument("--reused-bins-record", type=Path, required=True)
     hifiasm_manifest.add_argument("--output", type=Path, required=True)
     hifiasm_manifest.set_defaults(func=_hifiasm_manifest)
 
@@ -80,6 +96,7 @@ def main() -> None:
     busco_metrics.add_argument("--root", type=Path, required=True)
     busco_metrics.add_argument("--status", type=int, required=True)
     busco_metrics.add_argument("--lineage", required=True)
+    busco_metrics.add_argument("--download-path", type=Path, required=True)
     busco_metrics.add_argument("--version-file", type=Path, required=True)
     busco_metrics.add_argument("--output", type=Path, required=True)
     busco_metrics.set_defaults(func=_busco_metrics)
@@ -101,6 +118,7 @@ def main() -> None:
     mapping_metrics.add_argument("--minimap2-version", type=Path, required=True)
     mapping_metrics.add_argument("--samtools-version", type=Path, required=True)
     mapping_metrics.add_argument("--coverage-tool-version", type=Path, required=True)
+    mapping_metrics.add_argument("--filter-summary", type=Path, required=True)
     mapping_metrics.add_argument("--output", type=Path, required=True)
     mapping_metrics.set_defaults(func=_mapping_metrics)
 
@@ -193,8 +211,8 @@ def _kmer_metrics(args: argparse.Namespace) -> None:
     warnings = list(histogram.warnings)
     if histogram.peak_depth is None:
         warnings.append("KMER_NO_CLEAR_PEAK")
-    elif histogram.peak_depth <= 1:
-        warnings.append("KMER_LOW_PEAK_DEPTH")
+    elif histogram.peak_depth < args.low_coverage_peak_threshold:
+        warnings.append("KMER_LOW_COVERAGE_PEAK")
     model_status = genomescope.get("model_status")
     summary_warning = genomescope.get("warning")
     if isinstance(summary_warning, str):
@@ -203,6 +221,8 @@ def _kmer_metrics(args: argparse.Namespace) -> None:
         warnings.append("GENOMESCOPE_MODEL_FAILED")
     elif model_status != "success":
         warnings.append("GENOMESCOPE_MODEL_NOT_AVAILABLE")
+    elif genomescope.get("genome_size") is None:
+        warnings.append("GENOMESCOPE_MODEL_INCOMPLETE")
 
     data = {
         "sample_id": args.sample_id,
@@ -212,6 +232,7 @@ def _kmer_metrics(args: argparse.Namespace) -> None:
         "total_kmer_observations": histogram.total_kmer_observations,
         "peak_depth": histogram.peak_depth,
         "peak_count": histogram.peak_count,
+        "low_coverage_peak_threshold": args.low_coverage_peak_threshold,
         "genomescope_model_status": model_status,
         "genomescope_genome_size": genomescope.get("genome_size"),
         "genomescope_heterozygosity": genomescope.get("heterozygosity"),
@@ -274,6 +295,64 @@ def _raw_metrics(args: argparse.Namespace) -> None:
     _write_json(args.output, data)
 
 
+def _filter_hifi_reads(args: argparse.Namespace) -> None:
+    """Stream four-line FASTQ records through conservative length/quality filters."""
+    input_count = 0
+    input_bases = 0
+    retained_count = 0
+    retained_bases = 0
+    filtered_short_count = 0
+    filtered_low_quality_count = 0
+    with gzip.open(args.output, "wt", compresslevel=1) as output:
+        for input_path in args.input:
+            opener = gzip.open if input_path.suffix == ".gz" else Path.open
+            with opener(input_path, "rt") as source:
+                while header := source.readline():
+                    sequence = source.readline()
+                    separator = source.readline()
+                    quality = source.readline()
+                    if not sequence or not separator or not quality:
+                        raise ValueError(f"Incomplete FASTQ record in {input_path}")
+                    sequence_text = sequence.rstrip("\r\n")
+                    quality_text = quality.rstrip("\r\n")
+                    if not header.startswith("@") or not separator.startswith("+"):
+                        raise ValueError(f"Invalid FASTQ record in {input_path}")
+                    if len(sequence_text) != len(quality_text):
+                        raise ValueError(f"Sequence/quality length mismatch in {input_path}")
+                    read_length = len(sequence_text)
+                    mean_qscore = (
+                        sum(ord(character) - 33 for character in quality_text) / read_length
+                        if read_length
+                        else 0.0
+                    )
+                    input_count += 1
+                    input_bases += read_length
+                    if read_length < args.min_read_length:
+                        filtered_short_count += 1
+                        continue
+                    if mean_qscore < args.min_mean_qscore:
+                        filtered_low_quality_count += 1
+                        continue
+                    output.write(header)
+                    output.write(sequence)
+                    output.write(separator)
+                    output.write(quality)
+                    retained_count += 1
+                    retained_bases += read_length
+    summary: dict[str, object] = {
+        "input_read_count": input_count,
+        "input_bases": input_bases,
+        "retained_read_count": retained_count,
+        "retained_bases": retained_bases,
+        "filtered_short_read_count": filtered_short_count,
+        "filtered_low_quality_read_count": filtered_low_quality_count,
+        "min_read_length": args.min_read_length,
+        "min_mean_qscore": args.min_mean_qscore,
+        "retained_read_fraction": retained_count / input_count if input_count else None,
+    }
+    _write_json(args.summary, summary)
+
+
 def _hifiasm_manifest(args: argparse.Namespace) -> None:
     log_summary = parse_hifiasm_log(args.stderr)
     time_report = parse_time_report(args.time_report)
@@ -294,6 +373,8 @@ def _hifiasm_manifest(args: argparse.Namespace) -> None:
         "gfa_outputs": _relative_files(args.output.parent, "gfa", "*.gfa"),
         "fasta_outputs": _relative_files(args.output.parent, "fasta", "*.fa"),
         "bin_outputs": _relative_files(args.output.parent, "bins", "*.bin"),
+        "reused_bin_count": _count_reused_bins(args.reused_bins_record),
+        "reused_bins_record": str(args.reused_bins_record),
         "warnings": list(log_summary.warnings),
     }
     _write_json(args.output, data)
@@ -325,13 +406,18 @@ def _busco_metrics(args: argparse.Namespace) -> None:
     parsed = parse_busco_summary(summary) if summary is not None else parse_busco_summary(Path(""))
     success = args.status == 0 and parsed["complete"] is not None
     limitations = [] if args.lineage else ["BUSCO_LINEAGE_AUTO_RECOMMENDED"]
+    actual_lineage = infer_busco_lineage(summary) or (args.lineage if args.lineage else None)
+    dataset = parse_busco_dataset_metadata(args.download_path, actual_lineage)
     _write_json(
         args.output,
         {
             "tool": "busco",
             "status": "success" if success else "failed",
             "exit_code": args.status,
-            "lineage": args.lineage or "auto-lineage-euk",
+            "requested_lineage": args.lineage or None,
+            "lineage": actual_lineage,
+            "lineage_selection": "explicit" if args.lineage else "auto-lineage-euk",
+            "dataset": dataset,
             "version": _first_line(args.version_file),
             "metrics": parsed,
             "limitations": limitations,
@@ -366,6 +452,7 @@ def _merqury_metrics(args: argparse.Namespace) -> None:
 def _mapping_metrics(args: argparse.Namespace) -> None:
     coverage = parse_window_coverage(args.windows)
     mapped_fraction = parse_mapped_fraction(args.flagstat)
+    filter_summary = _read_json(args.filter_summary)
     success = args.status == 0 and mapped_fraction is not None
     _write_json(
         args.output,
@@ -379,9 +466,20 @@ def _mapping_metrics(args: argparse.Namespace) -> None:
                 "samtools": _first_line(args.samtools_version),
                 "coverage": _first_line(args.coverage_tool_version),
             },
-            "metrics": {"mapped_read_fraction": mapped_fraction, **coverage},
-            "limitations": ["MAPPING_USES_VALIDATED_UNFILTERED_HIFI_READS"],
-            "source": {"flagstat": str(args.flagstat), "windows": str(args.windows)},
+            "metrics": {
+                "mapped_read_fraction": mapped_fraction,
+                "input_read_count": filter_summary.get("input_read_count"),
+                "retained_read_count": filter_summary.get("retained_read_count"),
+                "retained_read_fraction": filter_summary.get("retained_read_fraction"),
+                **coverage,
+            },
+            "filter": filter_summary,
+            "limitations": ["MAPPING_FILTERED_HIFI_READS"],
+            "source": {
+                "flagstat": str(args.flagstat),
+                "windows": str(args.windows),
+                "filter_summary": str(args.filter_summary),
+            },
         },
     )
 
@@ -431,6 +529,9 @@ def _assembly_metrics(args: argparse.Namespace) -> None:
         kmer_qv=_typed_float(merqury_values.get("qv")),
         kmer_completeness=_typed_float(merqury_values.get("completeness")),
         mapped_read_fraction=_typed_float(mapping_values.get("mapped_read_fraction")),
+        mapping_input_read_count=_typed_int(mapping_values.get("input_read_count")),
+        mapping_retained_read_count=_typed_int(mapping_values.get("retained_read_count")),
+        mapping_retained_read_fraction=_typed_float(mapping_values.get("retained_read_fraction")),
         coverage_mean=_typed_float(mapping_values.get("mean")),
         coverage_median=_typed_float(mapping_values.get("median")),
         coverage_cv=_typed_float(mapping_values.get("cv")),
@@ -443,12 +544,28 @@ def _assembly_metrics(args: argparse.Namespace) -> None:
             "assembly_size": "fact",
             "contig_count": "fact",
             "contig_n50": "fact",
-            "busco_complete": "fact",
-            "busco_duplicated": "fact",
+            "contig_l50": "fact",
+            "longest_contig": "fact",
+            "quast_misassemblies": "fact",
+            "quast_local_misassemblies": "fact",
+            "genome_fraction": "derived",
+            "duplication_ratio": "derived",
+            "busco_complete": "derived",
+            "busco_single": "derived",
+            "busco_duplicated": "derived",
+            "busco_fragmented": "derived",
+            "busco_missing": "derived",
             "kmer_qv": "derived",
             "kmer_completeness": "derived",
             "mapped_read_fraction": "derived",
+            "mapping_input_read_count": "fact",
+            "mapping_retained_read_count": "fact",
+            "mapping_retained_read_fraction": "derived",
+            "coverage_mean": "derived",
+            "coverage_median": "derived",
             "coverage_cv": "derived",
+            "low_coverage_window_fraction": "derived",
+            "high_coverage_window_fraction": "derived",
             "assembly_size_ratio": "derived",
         },
         tool_versions={
@@ -459,11 +576,21 @@ def _assembly_metrics(args: argparse.Namespace) -> None:
             "samtools": _optional_string(_nested_dict(mapping, "versions").get("samtools")),
             "coverage": _optional_string(_nested_dict(mapping, "versions").get("coverage")),
         },
+        tool_metadata={
+            "busco": {
+                "requested_lineage": busco.get("requested_lineage"),
+                "actual_lineage": busco.get("lineage"),
+                "lineage_selection": busco.get("lineage_selection"),
+                "dataset": busco.get("dataset"),
+            },
+            "merqury": {"kmer_source": merqury.get("kmer_source")},
+            "mapping_filter": mapping.get("filter"),
+        },
         source_files={
-            "quast": str(args.quast),
-            "busco": str(args.busco),
-            "merqury": str(args.merqury),
-            "mapping": str(args.mapping),
+            "quast": "quast/quast_metrics.json",
+            "busco": "busco/busco_metrics.json",
+            "merqury": "merqury/merqury_metrics.json",
+            "mapping": "mapping/mapping_metrics.json",
         },
     )
     _write_json(args.output, metrics.model_dump(mode="json"))
@@ -472,6 +599,16 @@ def _assembly_metrics(args: argparse.Namespace) -> None:
 def _relative_files(base_dir: Path, subdir: str, pattern: str) -> list[str]:
     root = base_dir.parent / subdir
     return [str(path.relative_to(base_dir.parent)) for path in sorted(root.glob(pattern))]
+
+
+def _count_reused_bins(path: Path) -> int:
+    if not path.is_file():
+        return 0
+    return sum(
+        1
+        for line in path.read_text(errors="replace").splitlines()[1:]
+        if line.rstrip().endswith("\treused")
+    )
 
 
 def _write_key_value_table(path: Path, rows: Mapping[str, object]) -> None:

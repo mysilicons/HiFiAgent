@@ -128,6 +128,7 @@ conda run -n hifiAgent hifi-agent --help
 - 明确拒绝 Hi-C、ONT、trio 和 ultra-long 等 V1 范围外字段；
 - 生成 `00_metadata/resolved_config.yaml`；
 - 生成 `00_metadata/input_checksums.tsv`；
+- 生成带有元数据摘要的 `00_metadata/validation_receipt.json`，工作流拒绝缺失 receipt 的运行；
 - 为 `hifi-agent run` 生成 `00_metadata/hifi_reads.list`，确保工作流使用已验证输入。
 
 已使用本地 `Candida_albicans/Candida_albicans_HIFI.fastq` 验证：
@@ -184,6 +185,9 @@ conda run -n hifiAgent hifi-agent run --resume examples/candida_sample_config.ya
 `-resume` 已验证，成功任务会以 cached 状态复用。运行 Nextflow 时默认使用
 `/home/gw/software/jdk21/bin/java`。
 
+`tests/workflow/test_nextflow_resume_acceptance.py` 会在第二个进程运行时终止 Nextflow，
+随后以 `-resume` 恢复，并断言已完成的第一步状态为 `CACHED`、发布结果未丢失。
+
 ## 第 4 阶段状态
 
 第 4 阶段本地交付物已存在：
@@ -234,6 +238,7 @@ kmer:
 warning。`GENOMESCOPE_SUMMARY` 会条件性调用 GenomeScope；如果 GenomeScope 依赖缺失
 或拟合失败，只记录 `genomescope_model_status`、退出码和 warning，不编造 genome size、
 heterozygosity、repeat fraction 或 model fit。
+低覆盖峰阈值由 `kmer.low_coverage_peak_threshold` 配置，默认 10×。
 
 ## 第 6 阶段状态
 
@@ -268,6 +273,9 @@ runtime、peak RSS、GFA/FASTA/bin 输出位置和 warning。重跑时如果
 让 hifiasm 可以复用兼容中间文件。tiny workflow smoke test 可用 `--run_assembly false`
 跳过 assembly；正式样本默认运行 baseline assembly。
 
+复用候选现在通过带 SHA-256 的 `hifiasm_bin_reuse_candidates.tsv` 声明为工作流输入；
+验收要求 hifiasm 日志出现 `loaded corrected reads and overlaps from disk`。
+
 ## 第 7 阶段状态
 
 第 7 阶段组装后多维 QC 已接入 `workflow/main.nf`：
@@ -277,13 +285,16 @@ runtime、peak RSS、GFA/FASTA/bin 输出位置和 warning。重跑时如果
 - `BUSCO_POST_QC`：优先使用显式 lineage，缺失时使用 `--auto-lineage-euk`，不存在的
   数据集由 BUSCO 自动下载；
 - `MERQURY_POST_QC`：复用阶段 5 meryl 数据库，保留 QV、completeness 和 spectrum；
-- `MAPPING_POST_QC`：使用 minimap2 `map-hifi`、samtools，以及 mosdepth 或
+- `MAPPING_POST_QC`：先按 `mapping_qc` 中的长度和平均 Q 值阈值过滤 reads，再使用
+  minimap2 `map-hifi`、samtools，以及 mosdepth 或
   bedtools windows + `samtools bedcov` 统计覆盖；
 - `ASSEMBLY_METRICS`：生成统一的 `assembly_metrics.json`。
 
 四条评价支路分别捕获工具退出码；单个工具失败不会阻断其他指标，缺失值为 `null`。
 提供 `kmer_reads` 时标记 `independent_high_confidence`，否则标记
 `same_data_advisory` 并在结果中保留非独立性限制。
+BUSCO 自动谱系模式会从 specific summary 中记录实际 lineage，并保存 ODB 版本、
+数据集创建日期和 `dataset.cfg` 来源。最终 `metric_classes` 覆盖全部标量组装指标。
 
 ```text
 hifi-agent run --resume CONFIG

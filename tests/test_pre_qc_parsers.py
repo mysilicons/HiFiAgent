@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,8 @@ from hifi_agent.parsers.kmer import parse_kmer_histogram
 from hifi_agent.parsers.nanoplot import parse_nanostats
 from hifi_agent.parsers.seqkit import parse_seqkit_stats
 from hifi_agent.workflow_tools import main as workflow_tools_main
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_parse_seqkit_stats_types_and_weighted_fields(tmp_path: Path) -> None:
@@ -74,6 +77,75 @@ def test_parse_kmer_histogram_flags_multiple_comparable_peaks(tmp_path: Path) ->
     parsed = parse_kmer_histogram(histogram)
 
     assert "KMER_MULTIPLE_COMPARABLE_PEAKS" in parsed.warnings
+
+
+def test_kmer_metrics_warns_when_peak_is_below_configured_coverage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    histogram = tmp_path / "hist.tsv"
+    histogram.write_text("1 2\n5 20\n6 3\n")
+    genomescope = tmp_path / "genomescope.tsv"
+    genomescope.write_text("key\tvalue\nmodel_status\tnot_available\n")
+    output = tmp_path / "kmer.json"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "workflow_tools",
+            "kmer-metrics",
+            "--sample-id",
+            "sample",
+            "--histogram",
+            str(histogram),
+            "--genomescope-summary",
+            str(genomescope),
+            "--low-coverage-peak-threshold",
+            "10",
+            "--output",
+            str(output),
+        ],
+    )
+
+    workflow_tools_main()
+
+    data = json.loads(output.read_text())
+    assert "KMER_LOW_COVERAGE_PEAK" in data["warnings"]
+
+
+def test_failed_genomescope_model_never_supplies_genome_size(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    histogram = tmp_path / "hist.tsv"
+    histogram.write_text("1 2\n20 30\n21 3\n")
+    genomescope = tmp_path / "genomescope.tsv"
+    genomescope.write_text(
+        "key\tvalue\nmodel_status\tfailed\ngenome_size\tnull\n"
+        "heterozygosity\tnull\nrepeat_fraction\tnull\n"
+    )
+    output = tmp_path / "kmer.json"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "workflow_tools",
+            "kmer-metrics",
+            "--sample-id",
+            "sample",
+            "--histogram",
+            str(histogram),
+            "--genomescope-summary",
+            str(genomescope),
+            "--output",
+            str(output),
+        ],
+    )
+
+    workflow_tools_main()
+
+    data = json.loads(output.read_text())
+    assert data["genomescope_genome_size"] is None
+    assert data["genome_size_for_coverage"] is None
+    assert "GENOMESCOPE_MODEL_FAILED" in data["warnings"]
 
 
 def test_parse_genomescope_stdout_and_report(tmp_path: Path) -> None:
@@ -270,3 +342,44 @@ def test_raw_metrics_coverage_uses_genomescope_size_when_expected_missing(
     assert data["estimated_genome_size_source"] == "genomescope"
     assert data["estimated_coverage"] == 4
     assert "COVERAGE_NOT_CALCULATED_NO_GENOME_SIZE" not in data["warnings"]
+
+
+def test_raw_metrics_matches_golden_json_and_is_byte_stable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixtures = PROJECT_ROOT / "tests" / "fixtures" / "pre_qc"
+    for name in ("seqkit_stats.tsv", "NanoStats.txt", "kmer_metrics.json"):
+        shutil.copyfile(fixtures / name, tmp_path / name)
+    monkeypatch.chdir(tmp_path)
+
+    def render(output_name: str) -> Path:
+        output = Path(output_name)
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "workflow_tools",
+                "raw-metrics",
+                "--sample-id",
+                "golden_sample",
+                "--seqkit-stats",
+                "seqkit_stats.tsv",
+                "--nanostats",
+                "NanoStats.txt",
+                "--kmer-metrics",
+                "kmer_metrics.json",
+                "--expected-genome-size",
+                "50",
+                "--output",
+                output_name,
+            ],
+        )
+        workflow_tools_main()
+        return output
+
+    first = render("first.json")
+    second = render("second.json")
+    golden = PROJECT_ROOT / "tests" / "golden" / "raw_metrics.json"
+
+    assert json.loads(first.read_text()) == json.loads(golden.read_text())
+    assert first.read_bytes() == second.read_bytes()

@@ -1,0 +1,9 @@
+{
+  "genomescope_model_status": "not_available",
+  "kmer_source": "same_data_advisory",
+  "peak_depth": 5,
+  "warnings": [
+    "GENOMESCOPE_MODEL_NOT_AVAILABLE",
+    "KMER_LOW_COVERAGE_PEAK"
+  ]
+}

@@ -53,6 +53,17 @@ class KmerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     k: int = Field(default=21, ge=15, le=31)
+    low_coverage_peak_threshold: float = Field(default=10.0, ge=1.0, le=100.0)
+
+
+class MappingQcConfig(BaseModel):
+    """Conservative read-filter and coverage settings for post-assembly mapping."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_read_length: int = Field(default=1000, ge=0)
+    min_mean_qscore: float = Field(default=20.0, ge=0.0, le=60.0)
+    coverage_window_size: int = Field(default=10_000, ge=100)
 
 
 class SampleConfig(BaseModel):
@@ -73,6 +84,7 @@ class SampleConfig(BaseModel):
     resources: ResourceConfig = Field(default_factory=ResourceConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     kmer: KmerConfig = Field(default_factory=KmerConfig)
+    mapping_qc: MappingQcConfig = Field(default_factory=MappingQcConfig)
 
     @field_validator("sample_id")
     @classmethod

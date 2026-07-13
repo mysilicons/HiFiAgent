@@ -60,6 +60,7 @@ def validate(
     console.print("[green]Validation passed.[/green]")
     console.print(f"Resolved config: {result.resolved_config}")
     console.print(f"Input checksums: {result.input_checksums}")
+    console.print(f"Validation receipt: {result.validation_receipt}")
 
 
 @app.command()

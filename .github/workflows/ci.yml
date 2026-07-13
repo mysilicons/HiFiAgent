@@ -1,5 +1,12 @@
 name: CI
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
   pull_request:
@@ -30,3 +37,31 @@ jobs:
 
       - name: Unit tests
         run: pytest
+
+  nextflow-resume:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Nextflow
+        uses: nextflow-io/setup-nextflow@v2
+        with:
+          version: "25.04.7"
+
+      - name: Install test dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Verify interrupted workflow resume
+        run: pytest tests/workflow/test_nextflow_resume_acceptance.py

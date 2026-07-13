@@ -1,0 +1,4 @@
+Metrics	dataset
+number_of_reads	2
+number_of_bases	100
+mean_qscore	30
