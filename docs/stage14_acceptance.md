@@ -4,9 +4,8 @@ Date: 2026-07-14.
 
 ## Result
 
-**SOURCE/TAG RELEASE PASS; GITHUB RELEASE PAGE BLOCKED.** The implementation, verification, main
-branch publication, clean-clone demo, and annotated `v1.0.0` tag are complete. A strict full Stage
-14 PASS cannot be claimed until the GitHub Release page is created from the prepared release notes.
+**PASS.** The implementation, verification, main branch publication, clean-clone demo, annotated
+`v1.0.0` tag, and formal GitHub Release are complete.
 
 | Acceptance item | Evidence | Result |
 |---|---|---|
@@ -23,8 +22,8 @@ branch publication, clean-clone demo, and annotated `v1.0.0` tag are complete. A
 | Commands executable | Ruff, format, mypy, pytest, demo, benchmark passed locally | PASS |
 | Git branch and tag publication | `main` and annotated `v1.0.0` at `mysilicons/HiFiAgent` | PASS |
 | Clean-clone README demo | Fresh remote clone completed all 9 scenarios | PASS |
-| GitHub Release page | GitHub API timed out twice; release notes are prepared | **BLOCKED** |
+| GitHub Release page | `https://github.com/mysilicons/HiFiAgent/releases/tag/v1.0.0` | PASS |
 
-The remaining blocker is external and is not hidden by a placeholder success. The canonical
-repository is `https://github.com/mysilicons/HiFiAgent`; only Release-page metadata remains
-unchecked in `docs/release_checklist.md`.
+The canonical repository is `https://github.com/mysilicons/HiFiAgent`. Initial direct API attempts
+timed out; the configured proxy path subsequently created and verified the formal Release without
+printing or persisting credentials.

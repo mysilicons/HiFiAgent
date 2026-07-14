@@ -19,9 +19,8 @@
 - [x] Review and commit the current working tree.
 - [x] Push the reviewed commit to `https://github.com/mysilicons/HiFiAgent.git`.
 - [x] Create and push annotated tag `v1.0.0`.
-- [ ] Create the GitHub Release page using `docs/releases/v1.0.0.md` (API timed out).
+- [x] Create the GitHub Release page using `docs/releases/v1.0.0.md`.
 - [x] Verify the clean-clone README demo on Linux (9/9 scenarios passed).
 
-The source branch and release tag are published. The remaining checkbox is limited to GitHub's
-Release-page API/UI metadata; direct API connections timed out twice on 2026-07-14 while Git smart
-HTTPS push and clean clone succeeded.
+All local, source-control, clean-clone, tag, and GitHub Release checks are complete. Initial direct
+API attempts timed out, then the configured SOCKS proxy path succeeded without exposing credentials.

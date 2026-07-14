@@ -488,9 +488,9 @@ hifi-agent benchmark --output-dir benchmark/reports \
 V1.0.0 本地发布物包括 [CHANGELOG](CHANGELOG.md)、[CITATION](CITATION.cff)、
 [发布说明](docs/releases/v1.0.0.md)、[发布清单](docs/release_checklist.md)、
 [演示](docs/demo.md)和[面试问答](docs/interview_qa.md)。`main` 与 `v1.0.0` 发布标签已推送到
-[`mysilicons/HiFiAgent`](https://github.com/mysilicons/HiFiAgent)。GitHub API 在发布环境中
-连接超时，因此网页 Release 需要仓库所有者使用现有发布说明完成；代码、标签和复现资产
-不受此网络限制影响。
+[`mysilicons/HiFiAgent`](https://github.com/mysilicons/HiFiAgent)。正式 GitHub Release：
+[`v1.0.0`](https://github.com/mysilicons/HiFiAgent/releases/tag/v1.0.0)。发布后状态审计记录在
+[`docs/stage14_acceptance.md`](docs/stage14_acceptance.md)。
 
 ## V1 限制
 
