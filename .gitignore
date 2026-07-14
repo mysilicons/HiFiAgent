@@ -36,6 +36,8 @@ knowledge/index.json
 *.bam
 *.cram
 *.sam
+*.sra
+*.sra.*
 *.gfa
 *.fa
 *.fasta
