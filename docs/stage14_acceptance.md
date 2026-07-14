@@ -4,9 +4,9 @@ Date: 2026-07-14.
 
 ## Result
 
-**LOCAL RELEASE CANDIDATE PASS; EXTERNAL PUBLICATION BLOCKED.** The local implementation and
-verification are complete. A strict full Stage 14 PASS cannot be claimed until a repository owner
-provides a GitHub remote and authorizes publication of tag/release `v1.0.0`.
+**SOURCE/TAG RELEASE PASS; GITHUB RELEASE PAGE BLOCKED.** The implementation, verification, main
+branch publication, clean-clone demo, and annotated `v1.0.0` tag are complete. A strict full Stage
+14 PASS cannot be claimed until the GitHub Release page is created from the prepared release notes.
 
 | Acceptance item | Evidence | Result |
 |---|---|---|
@@ -21,8 +21,10 @@ provides a GitHub remote and authorizes publication of tag/release `v1.0.0`.
 | Resume/interview material | `docs/interview_qa.md` | PASS |
 | No large biological data/database/API key in Git | `.gitignore`, tracked-file and secret scans | PASS |
 | Commands executable | Ruff, format, mypy, pytest, demo, benchmark passed locally | PASS |
-| GitHub Release `v1.0.0` | No Git remote is configured; no authority/destination exists | **BLOCKED** |
+| Git branch and tag publication | `main` and annotated `v1.0.0` at `mysilicons/HiFiAgent` | PASS |
+| Clean-clone README demo | Fresh remote clone completed all 9 scenarios | PASS |
+| GitHub Release page | GitHub API timed out twice; release notes are prepared | **BLOCKED** |
 
-The release blocker is external, not hidden by a placeholder success. `CITATION.cff` still uses
-canonical repository is `https://github.com/mysilicons/HiFiAgent`. The exact remaining publication
-actions are unchecked in `docs/release_checklist.md` until the push and release complete.
+The remaining blocker is external and is not hidden by a placeholder success. The canonical
+repository is `https://github.com/mysilicons/HiFiAgent`; only Release-page metadata remains
+unchecked in `docs/release_checklist.md`.

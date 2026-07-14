@@ -16,10 +16,12 @@
 ## External publication
 
 - [x] Set the canonical repository URL in `CITATION.cff`.
-- [ ] Review and commit the current working tree.
-- [ ] Push the reviewed commit to a configured Git remote.
-- [ ] Create annotated tag `v1.0.0` and GitHub Release using `docs/releases/v1.0.0.md`.
-- [ ] Verify the clean-clone README demo on Linux.
+- [x] Review and commit the current working tree.
+- [x] Push the reviewed commit to `https://github.com/mysilicons/HiFiAgent.git`.
+- [x] Create and push annotated tag `v1.0.0`.
+- [ ] Create the GitHub Release page using `docs/releases/v1.0.0.md` (API timed out).
+- [x] Verify the clean-clone README demo on Linux (9/9 scenarios passed).
 
-External publication remains intentionally unchecked until the repository owner supplies and
-authorizes a remote; local code must not invent or push to a destination.
+The source branch and release tag are published. The remaining checkbox is limited to GitHub's
+Release-page API/UI metadata; direct API connections timed out twice on 2026-07-14 while Git smart
+HTTPS push and clean clone succeeded.
