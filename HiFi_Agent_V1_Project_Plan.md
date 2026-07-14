@@ -997,7 +997,7 @@ render_report(run_state) -> Path
 
 - hifiasm 官方参数文档；
 - hifiasm FAQ 和输出解释；
-- BUSCO 官方用户指南；
+- BUS CO 官方用户指南；
 - QUAST 官方手册；
 - Merqury 官方仓库和论文；
 - GenomeScope 2.0 官方仓库和论文；

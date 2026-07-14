@@ -27,13 +27,15 @@ def test_help_lists_initial_commands() -> None:
     assert "agent" in result.output
     assert "rag-index" in result.output
     assert "explain" in result.output
+    assert "optimize" in result.output
+    assert "synthesize-stage11-anomaly" in result.output
 
 
 def test_version_option() -> None:
     result = runner.invoke(app, ["--version"])
 
     assert result.exit_code == ExitCode.OK
-    assert "hifi-agent 0.1.0" in result.output
+    assert "hifi-agent 1.0.0" in result.output
 
 
 def test_placeholder_command_uses_project_exit_code() -> None:

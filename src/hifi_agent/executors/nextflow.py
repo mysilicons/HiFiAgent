@@ -11,6 +11,7 @@ from pathlib import Path
 
 import yaml
 
+from hifi_agent.agent.models import AssemblyConfig
 from hifi_agent.config import verify_recorded_input_checksums, verify_validation_receipt
 from hifi_agent.exceptions import ToolExecutionError
 from hifi_agent.schemas.sample import SampleConfig
@@ -202,6 +203,141 @@ def run_post_qc_workflow(run_dir: Path, *, resume: bool = True) -> NextflowRunRe
             f"Post-QC workflow failed with exit code {exc.returncode}: {' '.join(command)}"
         ) from exc
     return NextflowRunResult(tuple(command), run_dir, reads_manifest)
+
+
+def run_candidate_workflow(
+    run_dir: Path,
+    candidate: AssemblyConfig,
+    *,
+    resume: bool = True,
+) -> NextflowRunResult:
+    """Run one whitelisted candidate plus the identical Stage 7 post-QC process set."""
+    resolved_run = run_dir.resolve()
+    if candidate.run_id == "baseline" or candidate.retry_kind != "PARAMETER_OPTIMIZATION":
+        raise ToolExecutionError("Candidate workflow requires a non-baseline optimization config")
+    resolved_config = resolved_run / "00_metadata/resolved_config.yaml"
+    validation_receipt = resolved_run / "00_metadata/validation_receipt.json"
+    reads_manifest = resolved_run / "00_metadata/hifi_reads.list"
+    raw_metrics = resolved_run / "01_pre_qc/raw_metrics.json"
+    meryl_db = resolved_run / "01_pre_qc/kmer/read.meryl"
+    kmer_histogram = resolved_run / "01_pre_qc/kmer/kmer_histogram.tsv"
+    baseline_bins = resolved_run / "02_assembly/baseline/bins"
+    required = (
+        resolved_config,
+        validation_receipt,
+        reads_manifest,
+        raw_metrics,
+        meryl_db,
+        baseline_bins,
+    )
+    missing = [str(path) for path in required if not path.exists()]
+    if missing:
+        raise ToolExecutionError(f"Candidate workflow input(s) missing: {', '.join(missing)}")
+    raw_config = yaml.safe_load(resolved_config.read_text())
+    if not isinstance(raw_config, dict):
+        raise ToolExecutionError(f"Resolved config is not a YAML mapping: {resolved_config}")
+    config = SampleConfig.model_validate(raw_config)
+    verify_validation_receipt(config, validation_receipt)
+    verify_recorded_input_checksums(resolved_run / "00_metadata/input_checksums.tsv")
+    if candidate.threads > config.resources.max_threads:
+        raise ToolExecutionError("Candidate threads exceed validated resource limits")
+    if candidate.input_reads != config.hifi_reads:
+        raise ToolExecutionError("Candidate reads differ from the validated baseline inputs")
+
+    reuse_manifest = _write_hifiasm_bin_reuse_manifest(
+        resolved_run / "00_metadata" / f"{candidate.run_id}_bin_reuse.tsv",
+        baseline_bins,
+        f"{config.sample_id}.baseline",
+    )
+    if len(reuse_manifest.read_text().splitlines()) <= 1:
+        raise ToolExecutionError("No compatible baseline hifiasm .bin files are available")
+    candidate_config_path = (
+        resolved_run / "02_assembly" / candidate.run_id / "metadata/assembly_config.json"
+    )
+    candidate_config_path.parent.mkdir(parents=True, exist_ok=True)
+    candidate_config_path.write_text(candidate.model_dump_json(indent=2) + "\n")
+
+    nextflow = _find_nextflow()
+    kmer_source = "independent_high_confidence" if config.kmer_reads else "same_data_advisory"
+    command = [
+        nextflow,
+        "run",
+        str(WORKFLOW_ENTRY),
+        "-c",
+        str(WORKFLOW_CONFIG),
+        "-profile",
+        "local",
+        "-entry",
+        "CANDIDATE_ONLY",
+    ]
+    if resume:
+        command.append("-resume")
+    parameters = candidate.parameters
+    command.extend(
+        [
+            "--sample_id",
+            config.sample_id,
+            "--assembly_run_id",
+            candidate.run_id,
+            "--hifiasm_purge_level",
+            str(parameters.purge_level),
+            "--hifiasm_purge_similarity",
+            str(parameters.purge_similarity),
+            "--hifiasm_hom_cov",
+            str(parameters.hom_cov or ""),
+            "--hifiasm_disable_post_join",
+            str(parameters.disable_post_join).lower(),
+            "--reads_manifest",
+            str(reads_manifest),
+            "--raw_metrics",
+            str(raw_metrics),
+            "--bin_reuse_manifest",
+            str(reuse_manifest),
+            "--meryl_db",
+            str(meryl_db),
+            "--kmer_histogram",
+            str(kmer_histogram),
+            "--kmer_source",
+            kmer_source,
+            "--outdir",
+            str(resolved_run),
+            "--validation_receipt",
+            str(validation_receipt),
+            "--expected_genome_size",
+            str(config.expected_genome_size or ""),
+            "--reference_genome",
+            str(config.reference_genome or ""),
+            "--busco_lineage",
+            config.busco_lineage or "",
+            "--mapping_min_read_length",
+            str(config.mapping_qc.min_read_length),
+            "--mapping_min_mean_qscore",
+            str(config.mapping_qc.min_mean_qscore),
+            "--coverage_window_size",
+            str(config.mapping_qc.coverage_window_size),
+            "--max_threads",
+            str(min(candidate.threads, config.resources.max_threads)),
+            "--max_memory_gb",
+            str(config.resources.max_memory_gb),
+        ]
+    )
+    try:
+        subprocess.run(command, cwd=PROJECT_ROOT, env=_nextflow_environment(), check=True)
+    except subprocess.CalledProcessError as exc:
+        raise ToolExecutionError(
+            f"Candidate workflow failed with exit code {exc.returncode}: {' '.join(command)}"
+        ) from exc
+    expected = (
+        resolved_run / f"02_assembly/{candidate.run_id}/metadata/assembly_manifest.json",
+        resolved_run / f"02_assembly/{candidate.run_id}/fasta/{candidate.run_id}.primary.fa",
+        resolved_run / f"03_post_qc/{candidate.run_id}/assembly_metrics.json",
+    )
+    missing_outputs = [str(path) for path in expected if not path.is_file()]
+    if missing_outputs:
+        raise ToolExecutionError(
+            f"Candidate workflow completed without required output(s): {', '.join(missing_outputs)}"
+        )
+    return NextflowRunResult(tuple(command), resolved_run, reads_manifest)
 
 
 def _find_nextflow() -> str:

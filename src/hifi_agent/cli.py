@@ -4,15 +4,36 @@ from pathlib import Path
 from typing import Annotated, NoReturn
 
 import typer
+from pydantic import ValidationError
 
-from hifi_agent.agent import AgentController, ExistingRunAgentTools
+from hifi_agent.agent import AgentController, AssemblyConfig, ExistingRunAgentTools
+from hifi_agent.benchmarking import run_benchmark
 from hifi_agent.config import validate_config_file
 from hifi_agent.constants import APP_NAME, __version__
-from hifi_agent.exceptions import HiFiAgentError, NotImplementedCommandError
-from hifi_agent.executors.nextflow import run_phase3_workflow, run_post_qc_workflow
+from hifi_agent.exceptions import (
+    HiFiAgentError,
+    NotImplementedCommandError,
+    RuleEvaluationError,
+)
+from hifi_agent.executors.nextflow import (
+    run_candidate_workflow,
+    run_phase3_workflow,
+    run_post_qc_workflow,
+)
 from hifi_agent.logging import configure_logging, get_console
+from hifi_agent.optimization import (
+    DEFAULT_STAGE11_SCENARIO,
+    run_stage11_optimization,
+    synthesize_candida_stage11_scenario,
+)
 from hifi_agent.rag import DEFAULT_INDEX_PATH, build_knowledge_index, explain_run
+from hifi_agent.reporting import (
+    DEFAULT_SYNTHETIC_SCENARIO,
+    render_final_report,
+    synthesize_candida_quality_regression,
+)
 from hifi_agent.rules import load_default_rule_engine, load_rule_context, write_rule_decision
+from hifi_agent.schemas.metrics import AssemblyMetrics
 
 app = typer.Typer(
     name=APP_NAME,
@@ -213,12 +234,198 @@ def explain_decision(
     console.print(f"RAG comparison: {output_dir / 'rag_comparison.json'}")
 
 
+@app.command("synthesize-stage11-anomaly")
+def synthesize_stage11_anomaly(
+    run_dir: Annotated[
+        Path,
+        typer.Argument(help="Real Candida run directory used as the Stage 11 source."),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", help="Stage 11 synthetic closed-loop scenario JSON."),
+    ] = DEFAULT_STAGE11_SCENARIO,
+) -> None:
+    """Create the genuine-Candida-derived Stage 11 acceptance anomaly."""
+    try:
+        scenario = synthesize_candida_stage11_scenario(run_dir.resolve(), output.resolve())
+    except HiFiAgentError as exc:
+        abort_with_error(exc)
+    console = get_console()
+    console.print("[yellow]Stage 11 synthetic anomaly created.[/yellow]")
+    console.print(scenario.disclaimer)
+    console.print(f"Scenario: {output.resolve()}")
+
+
+@app.command()
+def optimize(
+    run_dir: Annotated[Path, typer.Argument(help="Existing run output directory.")],
+    scenario: Annotated[
+        Path | None,
+        typer.Option("--scenario", help="Explicitly synthetic Stage 11 scenario JSON."),
+    ] = None,
+    output_dir: Annotated[
+        Path | None,
+        typer.Option("--output-dir", help="Defaults to RUN_DIR/05_agent/optimization."),
+    ] = None,
+    execute: Annotated[
+        bool,
+        typer.Option("--execute", help="Execute authorized real candidate workflows."),
+    ] = False,
+    confirm_medium_high_risk: Annotated[
+        bool,
+        typer.Option(
+            "--confirm-medium-high-risk",
+            help="Explicitly authorize medium-high candidate execution.",
+        ),
+    ] = False,
+) -> None:
+    """Run one bounded Stage 11 candidate planning and comparison round."""
+    resolved_run = run_dir.resolve()
+
+    def _execute_candidate(candidate: AssemblyConfig) -> AssemblyMetrics:
+        run_candidate_workflow(resolved_run, candidate)
+        metrics_path = resolved_run / "03_post_qc" / candidate.run_id / "assembly_metrics.json"
+        return AssemblyMetrics.model_validate_json(metrics_path.read_text())
+
+    try:
+        result = run_stage11_optimization(
+            resolved_run,
+            scenario_path=scenario.resolve() if scenario else None,
+            output_dir=output_dir.resolve() if output_dir else None,
+            executor=_execute_candidate if execute else None,
+            confirm_medium_high_risk=confirm_medium_high_risk,
+        )
+    except (HiFiAgentError, ValidationError, OSError) as exc:
+        abort_with_error(RuleEvaluationError(f"Stage 11 optimization failed: {exc}"))
+    destination = (output_dir or resolved_run / "05_agent/optimization").resolve()
+    console = get_console()
+    console.print(f"[green]Stage 11 outcome: {result.outcome}[/green]")
+    console.print(f"Selected run: {result.selected_run_id or 'NONE'}")
+    console.print(f"Comparison: {destination / 'comparison.tsv'}")
+
+
+@app.command("synthesize-report-anomaly")
+def synthesize_report_anomaly(
+    run_dir: Annotated[
+        Path,
+        typer.Argument(help="Real Candida run directory used as the synthesis source."),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", help="Synthetic report scenario JSON path."),
+    ] = DEFAULT_SYNTHETIC_SCENARIO,
+) -> None:
+    """Create the report-only Candida quality-regression acceptance scenario."""
+    try:
+        scenario = synthesize_candida_quality_regression(
+            run_dir.resolve(),
+            output.resolve(),
+        )
+    except HiFiAgentError as exc:
+        abort_with_error(exc)
+    console = get_console()
+    console.print("[yellow]Synthetic report scenario created.[/yellow]")
+    console.print(scenario.disclaimer)
+    console.print(f"Scenario: {output.resolve()}")
+
+
 @app.command()
 def report(
     run_dir: Annotated[Path, typer.Argument(help="Existing run output directory.")],
+    output_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-dir", help="Report output directory; defaults to RUN_DIR/05_report."
+        ),
+    ] = None,
+    scenario: Annotated[
+        Path | None,
+        typer.Option("--scenario", help="Optional explicitly synthetic scenario JSON."),
+    ] = None,
+    show_absolute_paths: Annotated[
+        bool,
+        typer.Option(
+            "--show-absolute-paths",
+            help="Disable default sensitive-path redaction.",
+        ),
+    ] = False,
 ) -> None:
     """Render final reports for an existing run directory."""
-    abort_with_error(NotImplementedCommandError("report", run_dir))
+    try:
+        outputs = render_final_report(
+            run_dir.resolve(),
+            output_dir=output_dir.resolve() if output_dir else None,
+            scenario_path=scenario.resolve() if scenario else None,
+            redact_paths=not show_absolute_paths,
+        )
+    except HiFiAgentError as exc:
+        abort_with_error(exc)
+    console = get_console()
+    console.print("[green]Final report rendered.[/green]")
+    console.print(f"Markdown: {outputs.markdown}")
+    console.print(f"Summary JSON: {outputs.summary_json}")
+    console.print(f"Comparison: {outputs.comparison_tsv}")
+
+
+@app.command()
+def benchmark(
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Stage 13 benchmark artifact directory."),
+    ] = Path("benchmark/reports"),
+    real_run_dir: Annotated[
+        Path,
+        typer.Option("--real-run-dir", help="Retained public Candida workflow run."),
+    ] = Path("results/Candida_albicans_phase6"),
+    fixtures_only: Annotated[
+        bool,
+        typer.Option(
+            "--fixtures-only",
+            help="Run the portable logic demo without requiring retained real artifacts.",
+        ),
+    ] = False,
+) -> None:
+    """Run the reproducible Stage 13 benchmark and ablations."""
+    try:
+        result = run_benchmark(
+            output_dir.resolve(),
+            real_run_dir=None if fixtures_only else real_run_dir.resolve(),
+            require_real_data=not fixtures_only,
+        )
+    except (HiFiAgentError, ValidationError, OSError, ValueError) as exc:
+        abort_with_error(RuleEvaluationError(f"Stage 13 benchmark failed: {exc}"))
+    console = get_console()
+    status = "PASS" if result.acceptance_passed else "FAIL"
+    color = "green" if result.acceptance_passed else "red"
+    console.print(f"[{color}]Stage 13 benchmark: {status}[/{color}]")
+    console.print(f"Scenarios: {result.metrics.scenario_count}")
+    console.print(f"Report: {output_dir.resolve() / 'v1_benchmark.md'}")
+    if not result.acceptance_passed:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def demo(
+    output_dir: Annotated[
+        Path,
+        typer.Argument(help="Portable demo output directory."),
+    ] = Path("demo_output"),
+) -> None:
+    """Run the small, data-free Agent decision demo in under ten minutes."""
+    try:
+        result = run_benchmark(
+            output_dir.resolve(),
+            real_run_dir=None,
+            require_real_data=False,
+        )
+    except (HiFiAgentError, ValidationError, OSError, ValueError) as exc:
+        abort_with_error(RuleEvaluationError(f"Demo failed: {exc}"))
+    console = get_console()
+    console.print("[green]Portable Agent demo completed.[/green]")
+    console.print(
+        f"Scenarios passed: {sum(item.passed for item in result.scenarios)}/{len(result.scenarios)}"
+    )
+    console.print(f"Readable report: {output_dir.resolve() / 'v1_benchmark.md'}")
 
 
 def main() -> None:

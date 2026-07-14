@@ -1,0 +1,307 @@
+{
+  "schema_version": "1.0",
+  "benchmark_version": "1.0.0",
+  "generated_at": "2026-07-14T05:18:38.701643Z",
+  "project_version": "1.0.0",
+  "real_data_accessions": [
+    "SRR23724250",
+    "CP128823.1"
+  ],
+  "online_metadata_status": "Accessions verified from retained FASTQ/reference headers; live NCBI metadata lookup timed out on 2026-07-14.",
+  "scenarios": [
+    {
+      "scenario_id": "normal_hifi_metrics",
+      "data_kind": "synthetic_fixture",
+      "expected_decision": "BASELINE",
+      "observed_decision": "BASELINE",
+      "expected_action": "ACCEPT_DEFAULT_PARAMETERS",
+      "observed_action": "ACCEPT_DEFAULT_PARAMETERS",
+      "controlling_rule_ids": [
+        "METRICS_NORMAL_ACCEPT_BASELINE"
+      ],
+      "candidate_parameters": [],
+      "candidate_count": 0,
+      "parameter_legality": true,
+      "nonexistent_parameters": [],
+      "evidence_count": 5,
+      "repeat_consistent": true,
+      "passed": true,
+      "failure_reason": null
+    },
+    {
+      "scenario_id": "low_coverage_downsample",
+      "data_kind": "real_derived_perturbation",
+      "expected_decision": "STOP",
+      "observed_decision": "STOP",
+      "expected_action": "STOP_LOW_COVERAGE_SEARCH",
+      "observed_action": "STOP_LOW_COVERAGE_SEARCH",
+      "controlling_rule_ids": [
+        "COVERAGE_INSUFFICIENT_STOP"
+      ],
+      "candidate_parameters": [],
+      "candidate_count": 0,
+      "parameter_legality": true,
+      "nonexistent_parameters": [],
+      "evidence_count": 6,
+      "repeat_consistent": true,
+      "passed": true,
+      "failure_reason": null
+    },
+    {
+      "scenario_id": "oversized_duplicated_assembly",
+      "data_kind": "real_derived_perturbation",
+      "expected_decision": "RETRY",
+      "observed_decision": "RETRY",
+      "expected_action": "PROPOSE_STRONGER_PURGE",
+      "observed_action": "PROPOSE_STRONGER_PURGE",
+      "controlling_rule_ids": [
+        "ASM_SIZE_TOO_LARGE_AND_DUPLICATED"
+      ],
+      "candidate_parameters": [
+        {
+          "purge_similarity": 0.5
+        }
+      ],
+      "candidate_count": 1,
+      "parameter_legality": true,
+      "nonexistent_parameters": [],
+      "evidence_count": 2,
+      "repeat_consistent": true,
+      "passed": true,
+      "failure_reason": null
+    },
+    {
+      "scenario_id": "hom_cov_peak_conflict",
+      "data_kind": "real_derived_perturbation",
+      "expected_decision": "RETRY",
+      "observed_decision": "RETRY",
+      "expected_action": "PROPOSE_HOM_COV",
+      "observed_action": "PROPOSE_HOM_COV",
+      "controlling_rule_ids": [
+        "HOM_COV_TRUSTED_KMER_CONFLICT"
+      ],
+      "candidate_parameters": [
+        {
+          "hom_cov": 30
+        }
+      ],
+      "candidate_count": 1,
+      "parameter_legality": true,
+      "nonexistent_parameters": [],
+      "evidence_count": 11,
+      "repeat_consistent": true,
+      "passed": true,
+      "failure_reason": null
+    },
+    {
+      "scenario_id": "inbred_sample",
+      "data_kind": "synthetic_fixture",
+      "expected_decision": "RETRY",
+      "observed_decision": "RETRY",
+      "expected_action": "PROPOSE_DISABLE_PURGE",
+      "observed_action": "PROPOSE_DISABLE_PURGE",
+      "controlling_rule_ids": [
+        "INBRED_ALLOW_DISABLE_PURGE"
+      ],
+      "candidate_parameters": [
+        {
+          "purge_level": 0
+        }
+      ],
+      "candidate_count": 1,
+      "parameter_legality": true,
+      "nonexistent_parameters": [],
+      "evidence_count": 6,
+      "repeat_consistent": true,
+      "passed": true,
+      "failure_reason": null
+    },
+    {
+      "scenario_id": "high_n50_structural_error",
+      "data_kind": "real_derived_perturbation",
+      "expected_decision": "RETRY",
+      "observed_decision": "RETRY",
+      "expected_action": "PROPOSE_DISABLE_POST_JOIN",
+      "observed_action": "PROPOSE_DISABLE_POST_JOIN",
+      "controlling_rule_ids": [
+        "HIGH_N50_STRUCTURAL_ERROR_DISABLE_JOIN"
+      ],
+      "candidate_parameters": [
+        {
+          "disable_post_join": true
+        }
+      ],
+      "candidate_count": 1,
+      "parameter_legality": true,
+      "nonexistent_parameters": [],
+      "evidence_count": 9,
+      "repeat_consistent": true,
+      "passed": true,
+      "failure_reason": null
+    },
+    {
+      "scenario_id": "evaluation_tool_failure",
+      "data_kind": "synthetic_fixture",
+      "expected_decision": "STOP",
+      "observed_decision": "STOP",
+      "expected_action": "STOP_EVALUATION_INCOMPLETE",
+      "observed_action": "STOP_EVALUATION_INCOMPLETE",
+      "controlling_rule_ids": [
+        "EVALUATION_TOOL_FAILURE_STOP"
+      ],
+      "candidate_parameters": [],
+      "candidate_count": 0,
+      "parameter_legality": true,
+      "nonexistent_parameters": [],
+      "evidence_count": 1,
+      "repeat_consistent": true,
+      "passed": true,
+      "failure_reason": null
+    },
+    {
+      "scenario_id": "multi_metric_conflict",
+      "data_kind": "real_derived_perturbation",
+      "expected_decision": "STOP",
+      "observed_decision": "STOP",
+      "expected_action": "REQUIRE_HUMAN_REVIEW",
+      "observed_action": "REQUIRE_HUMAN_REVIEW",
+      "controlling_rule_ids": [
+        "MULTI_METRIC_CONFLICT_STOP"
+      ],
+      "candidate_parameters": [],
+      "candidate_count": 0,
+      "parameter_legality": true,
+      "nonexistent_parameters": [],
+      "evidence_count": 2,
+      "repeat_consistent": true,
+      "passed": true,
+      "failure_reason": null
+    },
+    {
+      "scenario_id": "insufficient_evidence",
+      "data_kind": "synthetic_fixture",
+      "expected_decision": "STOP",
+      "observed_decision": "STOP",
+      "expected_action": "STOP_INSUFFICIENT_EVIDENCE",
+      "observed_action": "STOP_INSUFFICIENT_EVIDENCE",
+      "controlling_rule_ids": [],
+      "candidate_parameters": [],
+      "candidate_count": 0,
+      "parameter_legality": true,
+      "nonexistent_parameters": [],
+      "evidence_count": 4,
+      "repeat_consistent": true,
+      "passed": true,
+      "failure_reason": null
+    },
+    {
+      "scenario_id": "candida_albicans_srr23724250",
+      "data_kind": "public_real",
+      "expected_decision": "STOP",
+      "observed_decision": "STOP",
+      "expected_action": "REVIEW_GENOME_SIZE_ESTIMATE",
+      "observed_action": "REVIEW_GENOME_SIZE_ESTIMATE",
+      "controlling_rule_ids": [
+        "ASM_SIZE_LARGE_DUPLICATION_LOW_REVIEW"
+      ],
+      "candidate_parameters": [],
+      "candidate_count": 0,
+      "parameter_legality": true,
+      "nonexistent_parameters": [],
+      "evidence_count": 7,
+      "repeat_consistent": true,
+      "passed": true,
+      "failure_reason": null
+    }
+  ],
+  "method_comparison": [
+    {
+      "method_id": "A",
+      "method": "Default hifiasm baseline",
+      "decision_source": "None",
+      "action": "RUN_DEFAULT_HIFIASM",
+      "candidate_count": 0,
+      "changes_rule_decision": null,
+      "cited_source_count": 0,
+      "safety_status": "NOT_APPLICABLE",
+      "interpretation": "Produces an assembly but has no evidence-aware stop or retry policy."
+    },
+    {
+      "method_id": "B",
+      "method": "Fixed pipeline without Agent",
+      "decision_source": "Fixed workflow",
+      "action": "RUN_FIXED_PIPELINE",
+      "candidate_count": 0,
+      "changes_rule_decision": null,
+      "cited_source_count": 0,
+      "safety_status": "NOT_APPLICABLE",
+      "interpretation": "Adds reproducible QC but no adaptive expert decision."
+    },
+    {
+      "method_id": "C",
+      "method": "Rules only",
+      "decision_source": "Versioned deterministic expert rules",
+      "action": "EVALUATE_AND_BOUND",
+      "candidate_count": 0,
+      "changes_rule_decision": false,
+      "cited_source_count": 0,
+      "safety_status": "PASS",
+      "interpretation": "Controls all parameter and stopping decisions without an LLM."
+    },
+    {
+      "method_id": "D",
+      "method": "Rules + RAG/LLM",
+      "decision_source": "Rules immutable; RAG adds sourced explanation",
+      "action": "STOP_AND_REVIEW",
+      "candidate_count": 0,
+      "changes_rule_decision": false,
+      "cited_source_count": 6,
+      "safety_status": "PASS",
+      "interpretation": "Adds provenance and prose while preserving the deterministic decision."
+    }
+  ],
+  "ablations": [
+    {
+      "ablation_id": "remove_rag",
+      "full_system_outcome": "Sourced explanation; decision preserved",
+      "ablated_outcome": "Same deterministic decision, no retrieved-source explanation",
+      "safety_regression": false,
+      "conclusion": "RAG improves traceable explanation and is not an authority for tuning."
+    },
+    {
+      "ablation_id": "n50_only_selector",
+      "full_system_outcome": "STOP: no qualified candidate under multi-metric hard gates",
+      "ablated_outcome": "Incorrectly selects candidate_0 because its N50 is larger",
+      "safety_regression": true,
+      "conclusion": "N50-only selection misses completeness and structural-quality regressions."
+    },
+    {
+      "ablation_id": "remove_failure_gate",
+      "full_system_outcome": "STOP_EVALUATION_INCOMPLETE",
+      "ablated_outcome": "May interpret missing QC output as biological evidence",
+      "safety_regression": true,
+      "conclusion": "Engineering failures must be separated from biological decisions."
+    }
+  ],
+  "metrics": {
+    "scenario_count": 10,
+    "pass_rate": 1.0,
+    "parameter_legality_rate": 1.0,
+    "nonexistent_parameter_rate": 0.0,
+    "rule_decision_accuracy": 1.0,
+    "erroneous_retry_rate": 0.0,
+    "unnecessary_retry_rate": 0.0,
+    "correct_stop_rate": 1.0,
+    "evidence_citation_accuracy": 1.0,
+    "repeat_consistency_rate": 1.0,
+    "average_candidates_per_scenario": 0.4,
+    "measured_extra_compute_cpu_hours": null,
+    "extra_compute_note": "No new candidate execution was performed by this metrics-only benchmark. The retained Stage 11 comparison contains a synthetic candidate only."
+  },
+  "acceptance_passed": true,
+  "limitations": [
+    "Perturbed scenarios are metric-level safety tests, not biological truth claims.",
+    "Only the Candida case consumed retained real workflow artifacts.",
+    "Candidate execution compute cost is not estimated when no new candidate was run."
+  ]
+}

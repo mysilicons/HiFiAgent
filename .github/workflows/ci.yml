@@ -36,7 +36,10 @@ jobs:
         run: mypy
 
       - name: Unit tests
-        run: pytest
+        run: pytest --cov --cov-report=term-missing --cov-fail-under=80
+
+      - name: Portable README demo
+        run: hifi-agent demo /tmp/hifi-agent-demo
 
   nextflow-resume:
     runs-on: ubuntu-latest

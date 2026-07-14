@@ -1,0 +1,4 @@
+# Preserve downloaded knowledge sources byte-for-byte and do not apply source whitespace rules.
+document/** whitespace=-trailing-space
+document/**/*.pdf binary
+document/*.pdf binary

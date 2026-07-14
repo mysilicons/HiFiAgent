@@ -4,6 +4,42 @@ HiFi Agent V1 是一个针对单样本真核 PacBio HiFi 基因组项目的受�
 
 V1 故意保守。系统必须在没有 LLM 的情况下工作：Nextflow 运行固定的工作流步骤，Python 解析器产生稳定的 JSON，规则引擎可以接受、停止或提出少量白名单的 hifiasm 候选者。任何可选的 RAG/LLM 层仅限于对已合法操作的解释和排序；它不得创建 shell 命令或引入不支持的参数。
 
+## 十分钟快速开始
+
+无需下载测序数据即可运行真实规则引擎和全部九个便携边界场景：
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+hifi-agent --version
+hifi-agent demo /tmp/hifi-agent-demo
+sed -n '1,160p' /tmp/hifi-agent-demo/v1_benchmark.md
+```
+
+预期结果是 `Scenarios passed: 9/9`。该命令验证 schema、规则、参数白名单、停止策略、
+重复一致性和报告输出，但不伪装成生物学组装。完整 Linux/Conda 工作流见
+[用户指南](docs/user_guide.md)，开发与测试见[开发者指南](docs/developer_guide.md)。
+
+## 架构与安全边界
+
+```mermaid
+flowchart LR
+  I[Sample YAML + HiFi FASTQ] --> V[Validation]
+  V --> N[Nextflow: QC + hifiasm]
+  N --> M[Typed metrics]
+  M --> R[Expert rules]
+  R --> C[Budgeted Agent]
+  C --> O[Bounded comparison]
+  R --> G[RAG / optional LLM explanation]
+  G -. no decision authority .-> C
+  C --> F[Report + provenance]
+  O --> F
+```
+
+规则是唯一的参数决策权威；LLM 不能生成 shell、增加候选或越过四参数白名单。详细职责边界
+见[架构说明](docs/architecture.md)和[规则目录](docs/rule_catalog.md)。
+
 ## V1 范围
 
 支持：
@@ -46,19 +82,23 @@ hifiasm 使用全局上限；meryl、NanoPlot 和组装后 QC 按工具并行能
 `max_threads` 和 `max_memory_gb` 仍可在样本 YAML 的 `resources` 中覆盖；在其他机器上
 运行时应显式设置为该机器可安全提供的容量。
 
-## 计划 CLI
+## CLI
 
 ```text
 hifi-agent validate CONFIG
 hifi-agent plan CONFIG
 hifi-agent run CONFIG
 hifi-agent evaluate RUN_DIR
+hifi-agent optimize RUN_DIR
 hifi-agent report RUN_DIR
+hifi-agent benchmark --output-dir benchmark/reports
+hifi-agent demo demo_output
 ```
 
-CLI 入口已在第 1 阶段建立。`validate` 已接入阶段 2 配置验证；`run` 会先执行
+CLI 入口已建立。`validate` 已接入阶段 2 配置验证；`run` 会先执行
 配置验证，再运行组装和阶段 7 评价；`evaluate` 可对已有 baseline 单独执行阶段 7；
-`plan` 和 `report` 命令目前是受控占位命令。
+`plan` 命令目前仍是受控占位命令；`report` 已实现阶段 12 的完整报告输出；
+`benchmark` 和 `demo` 分别提供阶段 13 的真实数据验收与便携演示。
 
 ## 存储库布局
 
@@ -363,3 +403,97 @@ LLM 模式默认使用 `DEEPSEEK_API_KEY` 和 OpenAI 兼容的 `deepseek-v4-pro`
 校验。输出包括 `explanation.json/.md`、`rag_comparison.json` 和带 source/chunk ID 的
 `rag_decision_trace.jsonl`。详见 [`docs/stage10_rag_llm.md`](docs/stage10_rag_llm.md) 与
 [`docs/stage10_acceptance.md`](docs/stage10_acceptance.md)。
+
+## 第 11 阶段有限闭环优化
+
+阶段 11 在阶段 8 专家规则明确授权 `RETRY` 时生成最多两个白名单候选，默认只允许一轮：
+
+```text
+hifi-agent optimize results/<sample_id>
+hifi-agent optimize results/<sample_id> --execute --confirm-medium-high-risk
+```
+
+真实执行入口会校验并重命名复用 baseline hifiasm `.bin`，然后让 candidate 经过与 baseline
+完全相同的 QUAST、BUSCO、Merqury、mapping 和 `ASSEMBLY_METRICS` 流程。比较器覆盖 size
+ratio、BUSCO、k-mer、mapping、coverage CV、N50 和 misassembly；被支配候选、工具失败和
+核心质量回退均不能被 N50 提升覆盖。输出位于 `05_agent/optimization/`。
+
+Candida albicans 人工异常由真实 baseline 指标及其 SHA-256 派生：
+
+```text
+hifi-agent synthesize-stage11-anomaly results/Candida_albicans_phase6
+hifi-agent optimize results/Candida_albicans_phase6 \
+  --scenario benchmark/perturbations/candida_albicans_stage11_closed_loop.json
+```
+
+该场景只用于闭环安全验收，并强制标注为 synthetic。详见
+[`docs/stage11_closed_loop.md`](docs/stage11_closed_loop.md) 与
+[`docs/stage11_acceptance.md`](docs/stage11_acceptance.md)。
+
+## 第 12 阶段报告系统
+
+从一个已有运行目录生成 Markdown、机器可读摘要、比较表、参数差异、来源清单、软件版本、
+复现命令和统一图表目录：
+
+```text
+hifi-agent report results/<sample_id>
+hifi-agent report results/<sample_id> --show-absolute-paths
+```
+
+默认隐藏本机绝对路径。失败或不完整运行也会生成报告，并将模块明确标记为 `FAILED`、
+`WARNING` 或 `NOT_RUN`；缺失指标写为 `null`/`NA (not available)`，不会伪装成 0。
+输出位于 `05_report/`：
+
+```text
+final_report.md
+final_summary.json
+comparison.tsv
+parameter_diff.tsv
+provenance.tsv
+software_versions.tsv
+reproducible_commands.txt
+figures/
+```
+
+用于报告验收的 Candida albicans 人工异常通过真实 baseline 指标确定性派生，并在文件和
+报告中强制标注为 synthetic，不能作为科学结果：
+
+```text
+hifi-agent synthesize-report-anomaly results/Candida_albicans_phase6
+hifi-agent report results/Candida_albicans_phase6 \
+  --scenario benchmark/perturbations/candida_albicans_quality_regression.json \
+  --output-dir results/Candida_albicans_phase6/05_report_synthetic
+```
+
+实现说明与严格验收证据见 [`docs/stage12_reporting.md`](docs/stage12_reporting.md) 和
+[`docs/stage12_acceptance.md`](docs/stage12_acceptance.md)。
+
+## 第 13 阶段测试、Benchmark 与消融
+
+```bash
+pytest --cov --cov-report=term-missing --cov-fail-under=80
+hifi-agent benchmark --output-dir benchmark/reports \
+  --real-run-dir results/Candida_albicans_phase6
+```
+
+当前验收为 199 passed、12 个显式条件测试 skipped，安全关键范围覆盖率 82.06%。十个自动
+场景全部通过，不存在 hifiasm 参数率为 0%，重复一致率为 100%。公开结果见
+[`benchmark/reports/v1_benchmark.md`](benchmark/reports/v1_benchmark.md)，包含默认 hifiasm、
+固定 pipeline、规则系统、规则+RAG/LLM 四种方法，以及去除 RAG、仅看 N50、去除工具失败
+门禁三组消融。真实案例使用 FASTQ 头部记录的 `SRR23724250` 和参考序列 `CP128823.1`；
+人工扰动均明确标为非科学结果。
+
+## 第 14 阶段发布候选
+
+V1.0.0 本地发布物包括 [CHANGELOG](CHANGELOG.md)、[CITATION](CITATION.cff)、
+[发布说明](docs/releases/v1.0.0.md)、[发布清单](docs/release_checklist.md)、
+[演示](docs/demo.md)和[面试问答](docs/interview_qa.md)。当前仓库尚未配置 Git remote，
+因此 GitHub tag/Release 是唯一未执行的外部发布步骤；本地代码不会猜测目标仓库或擅自推送。
+
+## V1 限制
+
+- 仅支持单样本、HiFi-only、二倍体导向的 contig 组装。
+- 不支持 Hi-C、trio、ONT、多倍体自动优化、scaffolding 或注释。
+- 同源 HiFi reads 的 k-mer 指标属于 advisory evidence，不等同独立验证。
+- RAG/LLM 只能解释，API 故障不会改变规则决定。
+- Candida Stage 11 候选是从真实 baseline 指标派生的显式 synthetic 安全测试，不能用于科研。

@@ -1,6 +1,11 @@
 nextflow.enable.dsl = 2
 
 def sampleId = params.sample_id as String
+def assemblyRunId = params.assembly_run_id ? params.assembly_run_id as String : 'baseline'
+def hifiasmPurgeLevel = params.hifiasm_purge_level == null ? 3 : params.hifiasm_purge_level as int
+def hifiasmPurgeSimilarity = params.hifiasm_purge_similarity == null ? 0.55 : params.hifiasm_purge_similarity as double
+def hifiasmHomCov = params.hifiasm_hom_cov ? params.hifiasm_hom_cov as String : ''
+def hifiasmDisablePostJoin = params.hifiasm_disable_post_join == null ? false : params.hifiasm_disable_post_join.toString().toBoolean()
 def validationReceipt = params.validation_receipt ? params.validation_receipt as String : ''
 def binReuseManifest = params.bin_reuse_manifest ? params.bin_reuse_manifest as String : ''
 def readsPattern = params.reads
@@ -281,10 +286,10 @@ process RAW_METRICS {
 }
 
 process HIFIASM_BASELINE {
-    tag "${sample_id}"
+    tag "${sample_id}:${assemblyRunId}"
     label 'assembly'
 
-    publishDir "${params.outdir}/02_assembly/baseline",
+    publishDir "${params.outdir}/02_assembly/${assemblyRunId}",
         mode: params.publish_mode,
         overwrite: true
 
@@ -292,7 +297,7 @@ process HIFIASM_BASELINE {
     tuple val(sample_id), path(reads), path(raw_metrics), path(bin_reuse_manifest)
 
     output:
-    tuple val(sample_id), path('metadata/assembly_manifest.json'), path('fasta/baseline.primary.fa'), emit: baseline
+    tuple val(sample_id), path('metadata/assembly_manifest.json'), path("fasta/${assemblyRunId}.primary.fa"), emit: baseline
     path 'logs', emit: logs
     path 'gfa', emit: gfa
     path 'fasta', emit: fasta
@@ -303,7 +308,7 @@ process HIFIASM_BASELINE {
     """
     set -euo pipefail
 
-    PREFIX="${sample_id}.baseline"
+    PREFIX="${sample_id}.${assemblyRunId}"
     mkdir -p logs gfa fasta bins metadata
 
     if command -v hifiasm >/dev/null 2>&1; then
@@ -327,7 +332,7 @@ process HIFIASM_BASELINE {
     "\$HIFIASM_BIN" --version > metadata/hifiasm.version.txt
     "\$GFATOOLS_BIN" version > metadata/gfatools.version.txt 2>&1 || true
 
-    printf 'path\\tstatus\\n' > metadata/reused_bins.tsv
+    printf 'source_path\\tdestination\\tstatus\\n' > metadata/reused_bins.tsv
     while IFS=\$'\\t' read -r bin expected_sha expected_bytes; do
         [ "\$bin" != "path" ] || continue
         [ -f "\$bin" ] || { printf 'Missing reuse candidate: %s\\n' "\$bin" >&2; exit 2; }
@@ -336,18 +341,32 @@ process HIFIASM_BASELINE {
             printf 'Checksum mismatch for reuse candidate: %s\\n' "\$bin" >&2
             exit 2
         }
-        cp "\$bin" .
-        printf '%s\\treused\\n' "\$bin" >> metadata/reused_bins.tsv
+        source_name=\$(basename "\$bin")
+        destination_name="\${source_name/${sample_id}.baseline/\$PREFIX}"
+        cp "\$bin" "\$destination_name"
+        printf '%s\\t%s\\treused\\n' "\$bin" "\$destination_name" >> metadata/reused_bins.tsv
     done < "${bin_reuse_manifest}"
 
-    printf '%s -o %s -t %s %s\\n' "\$HIFIASM_BIN" "\$PREFIX" "${task.cpus}" "${reads}" > metadata/hifiasm_command.txt
+    PARAMETER_ARGS=()
+    if [ "${assemblyRunId}" != "baseline" ]; then
+        PARAMETER_ARGS=(-l "${hifiasmPurgeLevel}" -s "${hifiasmPurgeSimilarity}")
+        if [ -n "${hifiasmHomCov}" ]; then
+            PARAMETER_ARGS+=(--hom-cov "${hifiasmHomCov}")
+        fi
+        if [ "${hifiasmDisablePostJoin}" = "true" ]; then
+            PARAMETER_ARGS+=(-u0)
+        fi
+    fi
+
+    printf '%q ' "\$HIFIASM_BIN" -o "\$PREFIX" -t "${task.cpus}" "\${PARAMETER_ARGS[@]}" ${reads} > metadata/hifiasm_command.txt
+    printf '\\n' >> metadata/hifiasm_command.txt
 
     if [ -x /usr/bin/time ]; then
         /usr/bin/time -v -o logs/hifiasm.time.txt \\
-            "\$HIFIASM_BIN" -o "\$PREFIX" -t "${task.cpus}" ${reads} \\
+            "\$HIFIASM_BIN" -o "\$PREFIX" -t "${task.cpus}" "\${PARAMETER_ARGS[@]}" ${reads} \\
             > logs/hifiasm.stdout 2> logs/hifiasm.stderr
     else
-        "\$HIFIASM_BIN" -o "\$PREFIX" -t "${task.cpus}" ${reads} \\
+        "\$HIFIASM_BIN" -o "\$PREFIX" -t "${task.cpus}" "\${PARAMETER_ARGS[@]}" ${reads} \\
             > logs/hifiasm.stdout 2> logs/hifiasm.stderr
         printf 'time_report_unavailable\\n' > logs/hifiasm.time.txt
     fi
@@ -370,13 +389,13 @@ process HIFIASM_BASELINE {
         fi
     }
 
-    convert_gfa "gfa/\${PREFIX}.bp.p_ctg.gfa" "fasta/baseline.primary.fa" "primary contig"
-    convert_gfa "gfa/\${PREFIX}.bp.hap1.p_ctg.gfa" "fasta/baseline.hap1.fa" "haplotype 1"
-    convert_gfa "gfa/\${PREFIX}.bp.hap2.p_ctg.gfa" "fasta/baseline.hap2.fa" "haplotype 2"
+    convert_gfa "gfa/\${PREFIX}.bp.p_ctg.gfa" "fasta/${assemblyRunId}.primary.fa" "primary contig"
+    convert_gfa "gfa/\${PREFIX}.bp.hap1.p_ctg.gfa" "fasta/${assemblyRunId}.hap1.fa" "haplotype 1"
+    convert_gfa "gfa/\${PREFIX}.bp.hap2.p_ctg.gfa" "fasta/${assemblyRunId}.hap2.fa" "haplotype 2"
 
     PYTHONPATH="${pythonPath}" python -m hifi_agent.workflow_tools hifiasm-manifest \\
         --sample-id "${sample_id}" \\
-        --run-id baseline \\
+        --run-id "${assemblyRunId}" \\
         --prefix "\$PREFIX" \\
         --command-file metadata/hifiasm_command.txt \\
         --stdout logs/hifiasm.stdout \\
@@ -388,10 +407,10 @@ process HIFIASM_BASELINE {
 }
 
 process QUAST {
-    tag "${sample_id}:baseline"
+    tag "${sample_id}:${assemblyRunId}"
     label 'post_qc'
 
-    publishDir "${params.outdir}/03_post_qc/baseline/quast",
+    publishDir "${params.outdir}/03_post_qc/${assemblyRunId}/quast",
         mode: params.publish_mode,
         overwrite: true
 
@@ -458,10 +477,10 @@ process QUAST {
 }
 
 process BUSCO_POST_QC {
-    tag "${sample_id}:baseline"
+    tag "${sample_id}:${assemblyRunId}"
     label 'post_qc'
 
-    publishDir "${params.outdir}/03_post_qc/baseline/busco",
+    publishDir "${params.outdir}/03_post_qc/${assemblyRunId}/busco",
         mode: params.publish_mode,
         overwrite: true
 
@@ -535,10 +554,10 @@ process BUSCO_POST_QC {
 }
 
 process MERQURY_POST_QC {
-    tag "${sample_id}:baseline"
+    tag "${sample_id}:${assemblyRunId}"
     label 'post_qc'
 
-    publishDir "${params.outdir}/03_post_qc/baseline/merqury",
+    publishDir "${params.outdir}/03_post_qc/${assemblyRunId}/merqury",
         mode: params.publish_mode,
         overwrite: true
 
@@ -602,10 +621,10 @@ process MERQURY_POST_QC {
 }
 
 process MAPPING_POST_QC {
-    tag "${sample_id}:baseline"
+    tag "${sample_id}:${assemblyRunId}"
     label 'post_qc'
 
-    publishDir "${params.outdir}/03_post_qc/baseline/mapping",
+    publishDir "${params.outdir}/03_post_qc/${assemblyRunId}/mapping",
         mode: params.publish_mode,
         overwrite: true
 
@@ -726,10 +745,10 @@ process MAPPING_POST_QC {
 }
 
 process ASSEMBLY_METRICS {
-    tag "${sample_id}:baseline"
+    tag "${sample_id}:${assemblyRunId}"
     label 'small'
 
-    publishDir "${params.outdir}/03_post_qc/baseline",
+    publishDir "${params.outdir}/03_post_qc/${assemblyRunId}",
         mode: params.publish_mode,
         overwrite: true
 
@@ -743,7 +762,7 @@ process ASSEMBLY_METRICS {
     """
     set -euo pipefail
     PYTHONPATH="${pythonPath}" python -m hifi_agent.workflow_tools assembly-metrics \
-        --run-id baseline \
+        --run-id "${assemblyRunId}" \
         --quast "${quast_metrics}" \
         --busco "${busco_metrics}" \
         --merqury "${merqury_metrics}" \
@@ -878,6 +897,93 @@ workflow HIFIASM_REUSE_ONLY {
             tuple(sample_id, reads, raw_metrics, bin_reuse_manifest)
         }
     HIFIASM_BASELINE(assembly_input_ch)
+}
+
+workflow CANDIDATE_ONLY {
+    if (!readsManifest || !params.raw_metrics || !binReuseManifest || !params.meryl_db) {
+        error "CANDIDATE_ONLY requires --reads_manifest, --raw_metrics, --bin_reuse_manifest, and --meryl_db"
+    }
+    if (assemblyRunId == 'baseline') {
+        error "CANDIDATE_ONLY requires a non-baseline --assembly_run_id"
+    }
+
+    assembly_reads_ch = Channel
+        .fromPath(readsManifest, checkIfExists: true)
+        .splitText()
+        .map { read -> read.trim() }
+        .filter { read -> read }
+        .map { read -> file(read) }
+        .collect()
+        .map { reads -> tuple(sampleId, reads) }
+    raw_metrics_ch = Channel.of(tuple(sampleId, file(params.raw_metrics)))
+    bin_reuse_ch = Channel.of(tuple(sampleId, file(binReuseManifest)))
+    assembly_input_ch = assembly_reads_ch
+        .join(raw_metrics_ch)
+        .join(bin_reuse_ch)
+        .map { sample_id, reads, raw_metrics, bin_reuse_manifest ->
+            tuple(sample_id, reads, raw_metrics, bin_reuse_manifest)
+        }
+    HIFIASM_BASELINE(assembly_input_ch)
+
+    quast_ch = HIFIASM_BASELINE.out.baseline.map {
+        sample_id, assembly_manifest, primary_fasta ->
+            tuple(
+                sample_id,
+                assembly_manifest,
+                primary_fasta,
+                referenceGenome,
+                expectedGenomeSize
+            )
+    }
+    busco_ch = HIFIASM_BASELINE.out.baseline.map {
+        sample_id, assembly_manifest, primary_fasta ->
+            tuple(
+                sample_id,
+                assembly_manifest,
+                primary_fasta,
+                buscoLineage,
+                buscoDownloadPath,
+                buscoTimeoutMinutes
+            )
+    }
+    QUAST(quast_ch)
+    BUSCO_POST_QC(busco_ch)
+
+    merqury_ch = HIFIASM_BASELINE.out.baseline.map {
+        sample_id, assembly_manifest, primary_fasta ->
+            tuple(
+                sample_id,
+                assembly_manifest,
+                primary_fasta,
+                file(params.meryl_db),
+                file(params.kmer_histogram ?: params.meryl_db),
+                kmerSource
+            )
+    }
+    MERQURY_POST_QC(merqury_ch)
+
+    mapping_ch = HIFIASM_BASELINE.out.baseline
+        .join(assembly_reads_ch)
+        .map { sample_id, assembly_manifest, primary_fasta, reads ->
+            tuple(sample_id, assembly_manifest, primary_fasta, reads, coverageWindowSize)
+        }
+    MAPPING_POST_QC(mapping_ch)
+
+    combined_ch = QUAST.out.metrics
+        .join(BUSCO_POST_QC.out.metrics)
+        .join(MERQURY_POST_QC.out.metrics)
+        .join(MAPPING_POST_QC.out.metrics)
+        .map { sample_id, quast_metrics, busco_metrics, merqury_metrics, mapping_metrics ->
+            tuple(
+                sample_id,
+                quast_metrics,
+                busco_metrics,
+                merqury_metrics,
+                mapping_metrics,
+                expectedGenomeSize
+            )
+        }
+    ASSEMBLY_METRICS(combined_ch)
 }
 
 workflow {

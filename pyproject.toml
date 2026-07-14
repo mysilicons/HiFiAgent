@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hifi-agent"
-version = "0.1.0"
+version = "1.0.0"
 description = "Constrained PacBio HiFi genome assembly assistant."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -13,6 +13,7 @@ authors = [
   { name = "HiFi Agent contributors" },
 ]
 dependencies = [
+  "jinja2>=3.1,<4",
   "pydantic>=2",
   "pypdf>=5,<7",
   "pyyaml>=6",
@@ -24,6 +25,7 @@ dependencies = [
 dev = [
   "mypy>=1.10",
   "pytest>=8",
+  "pytest-cov>=5,<7",
   "ruff>=0.5",
   "types-PyYAML",
 ]
@@ -34,10 +36,29 @@ hifi-agent = "hifi_agent.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"hifi_agent.reporting" = ["templates/*.j2"]
+
 [tool.pytest.ini_options]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.coverage.run]
+source = [
+  "hifi_agent.agent",
+  "hifi_agent.benchmarking",
+  "hifi_agent.config",
+  "hifi_agent.optimization.comparator",
+  "hifi_agent.parsers",
+  "hifi_agent.rag.safety",
+  "hifi_agent.rules",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
 
 [tool.ruff]
 line-length = 100
