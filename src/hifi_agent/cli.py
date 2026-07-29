@@ -15,7 +15,9 @@ from hifi_agent.exceptions import (
     InputValidationError,
     NotImplementedCommandError,
     RuleEvaluationError,
+    ToolExecutionError,
 )
+from hifi_agent.executors.candidate import CandidateExecutor
 from hifi_agent.executors.nextflow import (
     run_candidate_workflow,
     run_phase3_workflow,
@@ -32,7 +34,13 @@ from hifi_agent.orchestration import (
     ExecutingAssemblyTools,
     inspect_v1_migration,
 )
-from hifi_agent.rag import DEFAULT_INDEX_PATH, build_knowledge_index, explain_run, propose_run
+from hifi_agent.rag import (
+    DEFAULT_INDEX_PATH,
+    ApprovedCandidate,
+    build_knowledge_index,
+    explain_run,
+    propose_run,
+)
 from hifi_agent.reporting import (
     DEFAULT_SYNTHETIC_SCENARIO,
     render_final_report,
@@ -354,6 +362,81 @@ def propose_candidates(
     console.print(f"Approved candidates: {len(bundle.approved_candidates)}")
     console.print(f"Rejected proposals: {len(bundle.rejected_proposals)}")
     console.print(f"Audit: {destination / 'proposal_decision.json'}")
+
+
+@app.command("execute-candidate")
+def execute_approved_candidate(
+    run_dir: Annotated[Path, typer.Argument(help="Validated baseline run directory.")],
+    approved_json: Annotated[
+        Path,
+        typer.Argument(help="Standalone Stage 6 ApprovedCandidate JSON."),
+    ],
+    execution_root: Annotated[
+        Path,
+        typer.Option("--execution-root", help="Isolated immutable Stage 7 history root."),
+    ],
+    round_index: Annotated[
+        int,
+        typer.Option("--round", min=1, max=3, help="Optimization round coordinate."),
+    ] = 1,
+    candidate_index: Annotated[
+        int,
+        typer.Option("--candidate", min=1, max=2, help="Candidate coordinate."),
+    ] = 1,
+    resume: Annotated[
+        bool,
+        typer.Option("--resume", help="Resume the same incomplete attempt and Nextflow cache."),
+    ] = False,
+    retry: Annotated[
+        bool,
+        typer.Option("--retry", help="Create a new immutable attempt after a failed attempt."),
+    ] = False,
+    threads: Annotated[
+        int | None,
+        typer.Option("--threads", min=1, help="Optional threads within validated resource limits."),
+    ] = None,
+    confirm_medium_high_risk: Annotated[
+        bool,
+        typer.Option(
+            "--confirm-medium-high-risk",
+            help="Confirm a conditionally approved medium-high/high-risk candidate.",
+        ),
+    ] = False,
+) -> None:
+    """Execute one ApprovedCandidate through assembly and homologous post-QC."""
+    try:
+        approved = ApprovedCandidate.model_validate_json(approved_json.read_text())
+        receipt = CandidateExecutor(run_dir, execution_root).execute(
+            approved,
+            round_index=round_index,
+            candidate_index=candidate_index,
+            resume=resume,
+            retry=retry,
+            threads=threads,
+            confirm_medium_high_risk=confirm_medium_high_risk,
+        )
+    except (OSError, ValidationError) as exc:
+        abort_with_error(InputValidationError(f"ApprovedCandidate JSON is invalid: {exc}"))
+    except HiFiAgentError as exc:
+        abort_with_error(exc)
+    if receipt.status != "COMPLETED":
+        abort_with_error(
+            ToolExecutionError(
+                receipt.error or f"Stage 7 attempt ended with status {receipt.status}"
+            )
+        )
+    console = get_console()
+    console.print(f"[green]Stage 7 status: {receipt.status}[/green]")
+    console.print(f"Run ID: {receipt.attempt.run_id}")
+    console.print(f"Attempt ID: {receipt.attempt.attempt_id}")
+    console.print(f"Workflow outputs: {receipt.workflow_run_dir}")
+    receipt_path = (
+        execution_root.resolve()
+        / "02_assembly"
+        / receipt.attempt.relative_directory()
+        / "stage7_execution.json"
+    )
+    console.print(f"Receipt: {receipt_path}")
 
 
 @app.command("synthesize-stage11-anomaly")

@@ -1,3 +1,5 @@
+import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,8 +10,9 @@ import hifi_agent.cli
 from hifi_agent.cli import app
 from hifi_agent.constants import ExitCode
 from hifi_agent.executors.nextflow import NextflowRunResult
+from hifi_agent.rag.models import ApprovedCandidate
 from hifi_agent.rules.context import RuleContext
-from hifi_agent.rules.models import RuleDecision
+from hifi_agent.rules.models import CandidateParameters, RuleDecision
 
 runner = CliRunner()
 
@@ -30,6 +33,7 @@ def test_help_lists_initial_commands() -> None:
     assert "rag-index" in result.output
     assert "explain" in result.output
     assert "propose" in result.output
+    assert "execute-candidate" in result.output
     assert "optimize" in result.output
     assert "synthesize-stage11-anomaly" in result.output
 
@@ -289,3 +293,101 @@ def test_propose_command_passes_stage6_safety_options(
     assert observed["require_llm"] is True
     assert observed["max_candidates"] == 2
     assert observed["confirm_medium_high_risk"] is True
+
+
+def test_execute_candidate_loads_strict_approval_and_stage7_options(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parameters = CandidateParameters(disable_post_join=True)
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            parameters.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    approved = ApprovedCandidate(
+        candidate_id="disable_post_join",
+        origin="rule",
+        requested_parameters=parameters,
+        approved_parameters=parameters,
+        source_ids=["hifiasm_parameters"],
+        metric_ids=["quast_misassemblies"],
+        reason_codes=["REFERENCE_SUPPORTED_STRUCTURAL_ERRORS"],
+        risk_level="medium",
+        requires_user_confirmation=False,
+        confidence=0.8,
+        parameter_fingerprint=fingerprint,
+    )
+    approved_path = tmp_path / "approved.json"
+    approved_path.write_text(approved.model_dump_json())
+    run_dir = tmp_path / "baseline"
+    execution_root = tmp_path / "stage7"
+    observed: dict[str, object] = {}
+
+    class FakeExecutor:
+        def __init__(self, source: Path, destination: Path) -> None:
+            observed["source"] = source
+            observed["destination"] = destination
+
+        def execute(self, candidate: ApprovedCandidate, **kwargs: object) -> SimpleNamespace:
+            observed["candidate"] = candidate
+            observed.update(kwargs)
+            attempt = SimpleNamespace(
+                run_id="candidate_r02_c02",
+                attempt_id="attempt_001",
+                relative_directory=lambda: Path("round_02/candidate_02/attempt_001"),
+            )
+            return SimpleNamespace(
+                status="COMPLETED",
+                attempt=attempt,
+                workflow_run_dir=execution_root / "workflow",
+                error=None,
+            )
+
+    monkeypatch.setattr(hifi_agent.cli, "CandidateExecutor", FakeExecutor)
+    result = runner.invoke(
+        app,
+        [
+            "execute-candidate",
+            str(run_dir),
+            str(approved_path),
+            "--execution-root",
+            str(execution_root),
+            "--round",
+            "2",
+            "--candidate",
+            "2",
+            "--threads",
+            "6",
+            "--resume",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.OK
+    assert "Stage 7 status: COMPLETED" in result.output
+    assert observed["candidate"] == approved
+    assert observed["round_index"] == 2
+    assert observed["candidate_index"] == 2
+    assert observed["threads"] == 6
+    assert observed["resume"] is True
+
+
+def test_execute_candidate_rejects_non_approved_json(tmp_path: Path) -> None:
+    invalid = tmp_path / "assembly_config.json"
+    invalid.write_text('{"run_id": "candidate_r01_c01"}')
+
+    result = runner.invoke(
+        app,
+        [
+            "execute-candidate",
+            str(tmp_path / "run"),
+            str(invalid),
+            "--execution-root",
+            str(tmp_path / "stage7"),
+        ],
+    )
+
+    assert result.exit_code == ExitCode.INPUT_VALIDATION_FAILED
+    assert "ApprovedCandidate JSON is invalid" in result.output

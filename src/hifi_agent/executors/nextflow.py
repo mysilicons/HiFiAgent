@@ -213,9 +213,11 @@ def run_candidate_workflow(
     candidate: AssemblyConfig,
     *,
     resume: bool = True,
+    execution_run_dir: Path | None = None,
 ) -> NextflowRunResult:
     """Run one whitelisted candidate plus the identical Stage 7 post-QC process set."""
     resolved_run = run_dir.resolve()
+    output_run = execution_run_dir.resolve() if execution_run_dir is not None else resolved_run
     if candidate.run_id == "baseline" or candidate.retry_kind != "PARAMETER_OPTIMIZATION":
         raise ToolExecutionError("Candidate workflow requires a non-baseline optimization config")
     resolved_config = resolved_run / "00_metadata/resolved_config.yaml"
@@ -248,17 +250,19 @@ def run_candidate_workflow(
         raise ToolExecutionError("Candidate reads differ from the validated baseline inputs")
 
     reuse_manifest = _write_hifiasm_bin_reuse_manifest(
-        resolved_run / "00_metadata" / f"{candidate.run_id}_bin_reuse.tsv",
+        output_run / "00_metadata" / f"{candidate.run_id}_bin_reuse.tsv",
         baseline_bins,
         f"{config.sample_id}.baseline",
     )
     if len(reuse_manifest.read_text().splitlines()) <= 1:
         raise ToolExecutionError("No compatible baseline hifiasm .bin files are available")
-    candidate_metadata = resolved_run / "02_assembly" / candidate.run_id / "metadata"
-    write_hifiasm_contract_artifacts(candidate, candidate_metadata)
+    prelaunch_contract = output_run / "00_metadata" / f"{candidate.run_id}_parameter_contract"
+    write_hifiasm_contract_artifacts(candidate, prelaunch_contract)
 
     nextflow = _find_nextflow()
     kmer_source = "independent_high_confidence" if config.kmer_reads else "same_data_advisory"
+    nextflow_work = output_run / ".nextflow_work"
+    nextflow_work.mkdir(parents=True, exist_ok=True)
     command = [
         nextflow,
         "run",
@@ -269,6 +273,8 @@ def run_candidate_workflow(
         "local",
         "-entry",
         "CANDIDATE_ONLY",
+        "-work-dir",
+        str(nextflow_work),
     ]
     if resume:
         command.append("-resume")
@@ -298,7 +304,7 @@ def run_candidate_workflow(
             "--kmer_source",
             kmer_source,
             "--outdir",
-            str(resolved_run),
+            str(output_run),
             "--validation_receipt",
             str(validation_receipt),
             "--mapping_min_read_length",
@@ -328,22 +334,23 @@ def run_candidate_workflow(
             f"Candidate workflow failed with exit code {exc.returncode}: {' '.join(command)}"
         ) from exc
     expected = (
-        resolved_run / f"02_assembly/{candidate.run_id}/metadata/assembly_manifest.json",
-        resolved_run / f"02_assembly/{candidate.run_id}/fasta/{candidate.run_id}.primary.fa",
-        resolved_run / f"03_post_qc/{candidate.run_id}/assembly_metrics.json",
+        output_run / f"02_assembly/{candidate.run_id}/metadata/assembly_manifest.json",
+        output_run / f"02_assembly/{candidate.run_id}/fasta/{candidate.run_id}.primary.fa",
+        output_run / f"03_post_qc/{candidate.run_id}/assembly_metrics.json",
     )
     missing_outputs = [str(path) for path in expected if not path.is_file()]
     if missing_outputs:
         raise ToolExecutionError(
             f"Candidate workflow completed without required output(s): {', '.join(missing_outputs)}"
         )
+    candidate_metadata = output_run / "02_assembly" / candidate.run_id / "metadata"
     command_path = candidate_metadata / "hifiasm_command.txt"
     write_hifiasm_contract_artifacts(
         candidate,
         candidate_metadata,
         command_path=command_path,
     )
-    return NextflowRunResult(tuple(command), resolved_run, reads_manifest)
+    return NextflowRunResult(tuple(command), output_run, reads_manifest)
 
 
 def _find_nextflow() -> str:

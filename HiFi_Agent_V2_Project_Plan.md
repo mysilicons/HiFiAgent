@@ -901,16 +901,16 @@ conda run -n hifiAgent mypy
 
 ### 任务
 
-- [ ] candidate executor 只接收 `ApprovedCandidate`；
-- [ ] 运行前再次验证输入 checksum、资源和参数契约；
-- [ ] 验证 hifiasm `.bin` 复用兼容性；
-- [ ] 禁止跨不兼容参数复用可能影响科学结论的 cache；
-- [ ] 保存全部 GFA、FASTA、bin、日志、版本和资源消耗；
-- [ ] candidate 使用 baseline 相同版本的 QUAST/BUSCO/Merqury/mapping；
-- [ ] 对工具失败保留部分产物；
-- [ ] post-QC 输出绑定 attempt ID；
-- [ ] tool failure 不得被解释为低生物学质量；
-- [ ] 支持 resume 和 attempt 重试。
+- [x] candidate executor 只接收 `ApprovedCandidate`；
+- [x] 运行前再次验证输入 checksum、资源和参数契约；
+- [x] 验证 hifiasm `.bin` 复用兼容性；
+- [x] 禁止跨不兼容参数复用可能影响科学结论的 cache；
+- [x] 保存全部 GFA、FASTA、bin、日志、版本和资源消耗；
+- [x] candidate 使用 baseline 相同版本的 QUAST/BUSCO/Merqury/mapping；
+- [x] 对工具失败保留部分产物；
+- [x] post-QC 输出绑定 attempt ID；
+- [x] tool failure 不得被解释为低生物学质量；
+- [x] 支持 resume 和 attempt 重试。
 
 ### 验收
 

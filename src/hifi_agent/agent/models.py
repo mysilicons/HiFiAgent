@@ -100,7 +100,7 @@ class AssemblyConfig(BaseModel):
     risk_level: RiskLevel
     requires_user_confirmation: bool = False
     retry_kind: RetryKind = "NONE"
-    optimization_round: int = Field(default=0, ge=0, le=2)
+    optimization_round: int = Field(default=0, ge=0, le=3)
 
     def parameter_fingerprint(self) -> str:
         """Return a stable hash used to prevent duplicate parameter runs."""

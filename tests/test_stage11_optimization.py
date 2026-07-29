@@ -343,6 +343,7 @@ def test_real_candidate_executor_builds_whitelisted_same_qc_workflow_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     run_dir = tmp_path / "run"
+    execution_run = tmp_path / "stage7_attempt/workflow"
     reads = tmp_path / "reads.fastq.gz"
     reads.write_bytes(b"reads")
     config = {
@@ -383,9 +384,13 @@ def test_real_candidate_executor_builds_whitelisted_same_qc_workflow_command(
     def fake_run(command: list[str], **kwargs: object) -> None:
         observed["command"] = command
         observed["kwargs"] = kwargs
-        manifest = run_dir / "02_assembly/candidate_r01_c01/metadata/assembly_manifest.json"
-        fasta = run_dir / "02_assembly/candidate_r01_c01/fasta/candidate_r01_c01.primary.fa"
-        metrics = run_dir / "03_post_qc/candidate_r01_c01/assembly_metrics.json"
+        assert (
+            execution_run / "00_metadata/candidate_r01_c01_parameter_contract/requested_config.json"
+        ).is_file()
+        assert not (execution_run / "02_assembly/candidate_r01_c01/metadata").exists()
+        manifest = execution_run / "02_assembly/candidate_r01_c01/metadata/assembly_manifest.json"
+        fasta = execution_run / "02_assembly/candidate_r01_c01/fasta/candidate_r01_c01.primary.fa"
+        metrics = execution_run / "03_post_qc/candidate_r01_c01/assembly_metrics.json"
         manifest.parent.mkdir(parents=True, exist_ok=True)
         fasta.parent.mkdir(parents=True, exist_ok=True)
         metrics.parent.mkdir(parents=True, exist_ok=True)
@@ -401,7 +406,11 @@ def test_real_candidate_executor_builds_whitelisted_same_qc_workflow_command(
     monkeypatch.setattr(nextflow_executor, "verify_recorded_input_checksums", lambda *args: None)
     monkeypatch.setattr("hifi_agent.executors.nextflow.subprocess.run", fake_run)
 
-    result = nextflow_executor.run_candidate_workflow(run_dir, candidate)
+    result = nextflow_executor.run_candidate_workflow(
+        run_dir,
+        candidate,
+        execution_run_dir=execution_run,
+    )
     command = observed["command"]
 
     assert isinstance(command, list)
@@ -411,12 +420,17 @@ def test_real_candidate_executor_builds_whitelisted_same_qc_workflow_command(
     assert "--hifiasm_hom_cov" not in command
     assert "--reference_genome" not in command
     assert "--busco_lineage" not in command
-    assert result.outdir == run_dir.resolve()
-    reuse = metadata / "candidate_r01_c01_bin_reuse.tsv"
+    assert command[command.index("-work-dir") + 1] == str(
+        (execution_run / ".nextflow_work").resolve()
+    )
+    assert command[command.index("--outdir") + 1] == str(execution_run.resolve())
+    assert result.outdir == execution_run.resolve()
+    assert not (run_dir / "02_assembly/candidate_r01_c01").exists()
+    reuse = execution_run / "00_metadata/candidate_r01_c01_bin_reuse.tsv"
     assert len(reuse.read_text().splitlines()) == 4
     contract = json.loads(
         (
-            run_dir / "02_assembly/candidate_r01_c01/metadata/parameter_contract_check.json"
+            execution_run / "02_assembly/candidate_r01_c01/metadata/parameter_contract_check.json"
         ).read_text()
     )
     assert contract["status"] == "PASS"

@@ -86,3 +86,16 @@ when their milestone begins.
 | V2-606 Emit proposal and retrieval audit receipts | V2-M3 | V2-602..605 | complete | JSON/JSONL receipt and hash tests |
 | V2-607 Run genuine Candida acceptance | V2-M3 | V2-601..606 | complete | checksum-bound real-data integration test |
 | V2-608 Complete Stage 6 quality gates | V2-M3 | V2-601..607 | complete | `v2_stage6_acceptance.md` |
+
+## Stage 7 issues
+
+| Issue | Milestone | Dependency | Status | Acceptance evidence |
+|---|---|---|---|---|
+| V2-701 Add ApprovedCandidate-only executor | V2-M4 | V2-608 | complete | strict schema/CLI tests |
+| V2-702 Add checksum/resource/cache preflight | V2-M4 | V2-701 | complete | tamper, risk, version-drift tests |
+| V2-703 Isolate immutable candidate attempts | V2-M4 | V2-201, V2-701 | complete | resume/retry and real attempts |
+| V2-704 Enforce four-stage parameter lineage | V2-M4 | V2-701 | complete | real parameter lineage receipt |
+| V2-705 Enforce homologous post-QC | V2-M4 | V2-701 | complete | version/evaluation signature receipt |
+| V2-706 Retain complete and partial artifacts | V2-M4 | V2-703 | complete | real 9,722-entry inventory |
+| V2-707 Run genuine DeepSeek-approved Candida candidate | V2-M4 | V2-608, V2-701..706 | complete | gated real-data acceptance |
+| V2-708 Complete Stage 7 quality gates | V2-M4 | V2-701..707 | complete | `v2_stage7_acceptance.md` |

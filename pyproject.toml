@@ -49,6 +49,7 @@ source = [
   "hifi_agent.agent",
   "hifi_agent.benchmarking",
   "hifi_agent.config",
+  "hifi_agent.executors.candidate",
   "hifi_agent.executors.hifiasm_contract",
   "hifi_agent.optimization.comparator",
   "hifi_agent.orchestration",

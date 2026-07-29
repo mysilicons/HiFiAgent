@@ -285,6 +285,9 @@ def test_legal_llm_proposal_becomes_approved_candidate_without_mutation(tmp_path
     assert bundle.proposal_output_sha256
     assert bundle.api_metadata["total_tokens"] == 150
     assert (tmp_path / "audit/proposal_decision.json").is_file()
+    for candidate in bundle.approved_candidates:
+        standalone = tmp_path / "audit/approved_candidates" / f"{candidate.candidate_id}.json"
+        assert ApprovedCandidate.model_validate_json(standalone.read_text()) == candidate
     assert (tmp_path / "audit/retrieval_trace.json").is_file()
     assert (tmp_path / "audit/proposal_trace.jsonl").is_file()
 

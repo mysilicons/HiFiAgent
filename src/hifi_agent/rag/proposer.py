@@ -695,6 +695,12 @@ def _write_receipts(
 ) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     (destination / "proposal_decision.json").write_text(bundle.model_dump_json(indent=2) + "\n")
+    approved_dir = destination / "approved_candidates"
+    approved_dir.mkdir(parents=True, exist_ok=True)
+    for candidate in bundle.approved_candidates:
+        (approved_dir / f"{candidate.candidate_id}.json").write_text(
+            candidate.model_dump_json(indent=2) + "\n"
+        )
     (destination / "retrieval_trace.json").write_text(
         json.dumps(retrieval_trace, indent=2, sort_keys=True) + "\n"
     )
