@@ -53,7 +53,7 @@
   },
   "release_artifact": {
     "filename": "hifi_agent-2.0.0-py3-none-any.whl",
-    "sha256": "b448d95e2a8dd90d62774be0985772493fbc47e0d527286fc2de158d1d44a6bd",
+    "sha256": "71b9164d66630a3ea0bbbe22a26db129b96155a42f91c30f3098a6f3c45a35fa",
     "isolated_install": "PASS",
     "packaged_comparison_policy": "PASS",
     "installed_demo": "PASS"
@@ -67,6 +67,17 @@
       "skipped_live_api": 1
     }
   },
-  "clean_clone": "PENDING_FINAL_COMMIT",
-  "git_tag": "PENDING_CLEAN_TREE"
+  "clean_clone": {
+    "commit": "2469b9d93291d743a7524fc1cbc90d997a432897",
+    "version": "PASS",
+    "all_public_command_help": "PASS",
+    "readme_quickstart": "PASS",
+    "release_tests": "7/7",
+    "isolated_wheel_install": "PASS"
+  },
+  "git_tag": {
+    "name": "v2.0.0",
+    "kind": "annotated",
+    "created_after_clean_tree": true
+  }
 }

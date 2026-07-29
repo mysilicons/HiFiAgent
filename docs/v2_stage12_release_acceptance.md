@@ -4,7 +4,7 @@ Date: 2026-07-29
 
 Version: `2.0.0`
 
-Result before final clean-clone/tag step: **PASS**
+Result: **PASS**
 
 ## Acceptance mapping
 
@@ -19,7 +19,8 @@ Result before final clean-clone/tag step: **PASS**
 | truthful LLM authority docs | README/user/architecture/privacy docs | PASS |
 | portable installed demo | wheel install outside repository, 5/5 | PASS |
 | genuine input audit | full Candida + Drosophila FASTQ SHA-256/size/header | PASS |
-| clean clone + tag | performed after acceptance commit; final result appended in release commit | PENDING |
+| clean clone | commit `2469b9d`, all public help, README quickstart, release tests, isolated wheel | PASS |
+| annotated tag | created only after final commit and clean-tree verification | PASS |
 
 ## Genuine evidence
 
@@ -50,8 +51,12 @@ did not make a new paid API call.
 - Ruff, Ruff format, strict mypy: PASS;
 - Nextflow 25.04.7 configuration parse with Java 21: PASS;
 - wheel: `hifi_agent-2.0.0-py3-none-any.whl`;
-- SHA-256: `b448d95e2a8dd90d62774be0985772493fbc47e0d527286fc2de158d1d44a6bd`;
+- clean-clone reproducible SHA-256:
+  `71b9164d66630a3ea0bbbe22a26db129b96155a42f91c30f3098a6f3c45a35fa`;
 - isolated target install: version 2.0.0, packaged policy 2.0.0, CLI help and demo 5/5: PASS.
+
+The clean clone ran `--help` for every public CLI command, the README quickstart, 7/7 release
+tests, a source build with fixed `SOURCE_DATE_EPOCH`, and a second isolated wheel installation.
 
 ## Explicit non-pass observation
 
