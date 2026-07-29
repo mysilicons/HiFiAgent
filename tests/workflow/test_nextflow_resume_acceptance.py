@@ -54,17 +54,20 @@ def test_interrupted_workflow_resumes_completed_process_from_cache(tmp_path: Pat
         text=True,
         start_new_session=True,
     )
+    first_output = outdir / "published" / "first.txt"
     deadline = time.monotonic() + 30
-    while not (control_dir / "second_started").exists() and time.monotonic() < deadline:
+    while (
+        not (control_dir / "second_started").exists() or not first_output.exists()
+    ) and time.monotonic() < deadline:
         if interrupted.poll() is not None:
             stdout, stderr = interrupted.communicate()
             pytest.fail(f"Workflow exited before interruption point:\n{stdout}\n{stderr}")
         time.sleep(0.1)
     assert (control_dir / "second_started").is_file(), "second process never started"
+    assert first_output.is_file(), "first process output was not published before interruption"
     os.killpg(interrupted.pid, signal.SIGTERM)
     interrupted.communicate(timeout=20)
 
-    first_output = outdir / "published" / "first.txt"
     assert first_output.read_text() == "stable completed output\n"
     assert not (outdir / "published" / "second.txt").exists()
 
