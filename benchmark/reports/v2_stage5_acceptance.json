@@ -1,0 +1,42 @@
+{
+  "schema_version": "2.0",
+  "accepted_at": "2026-07-15",
+  "stages": [5],
+  "status": "PASS",
+  "quality_gates": {
+    "stage5_tests_passed": 27,
+    "focused_tests_passed": 38,
+    "full_pytest_passed": 268,
+    "full_pytest_failed": 0,
+    "full_pytest_skipped": 13,
+    "ruff_check": "PASS",
+    "ruff_format_check": "PASS",
+    "mypy": "PASS",
+    "coverage_percent": 83.71,
+    "coverage_required_percent": 80.0
+  },
+  "index": {
+    "catalog_version": "2.0.0",
+    "target_hifiasm_version": "0.25.0-r726",
+    "source_count": 16,
+    "chunk_count": 336,
+    "stale_source_warnings": 0,
+    "quarantined_production_chunks": 0,
+    "official_parameter_coverage": {
+      "purge_level": ["hifiasm_faq", "hifiasm_hifi_only", "hifiasm_parameters"],
+      "purge_similarity": ["hifiasm_faq", "hifiasm_parameters"],
+      "hom_cov": ["hifiasm_faq", "hifiasm_output", "hifiasm_parameters"],
+      "disable_post_join": ["hifiasm_faq", "hifiasm_parameters"]
+    }
+  },
+  "acceptance": {
+    "checksum_fail_closed": "PASS",
+    "version_mismatch_downweighted": "PASS",
+    "no_evidence_no_llm_call": "PASS",
+    "catalog_bounded_results": "PASS",
+    "prompt_injection_quarantined": "PASS",
+    "retrieval_trace": "PASS",
+    "index_manifest": "PASS"
+  },
+  "retained_candida_modified": false
+}

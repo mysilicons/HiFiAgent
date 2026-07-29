@@ -1,0 +1,37 @@
+{
+  "schema_version": "2.0",
+  "accepted_at": "2026-07-15",
+  "stages": [2, 3],
+  "status": "PASS",
+  "quality_gates": {
+    "focused_tests_passed": 84,
+    "full_pytest_passed": 243,
+    "full_pytest_failed": 0,
+    "full_pytest_skipped": 13,
+    "ruff_check": "PASS",
+    "ruff_format_check": "PASS",
+    "mypy": "PASS",
+    "nextflow_smoke": "PASS",
+    "coverage_percent": 82.72,
+    "coverage_required_percent": 80.0
+  },
+  "stage2_acceptance": {
+    "max_rounds": 3,
+    "immutable_attempts": "PASS",
+    "attempt_002_retry": "PASS",
+    "completed_idempotence": "PASS",
+    "tamper_detection": "PASS",
+    "concurrent_identity_single_winner": "PASS",
+    "v1_read_only_migration": "PASS"
+  },
+  "stage3_acceptance": {
+    "assemble_cli": "PASS",
+    "baseline_fixture": "PASS",
+    "candidate_execution_path": "PASS",
+    "post_qc_single_call": "PASS",
+    "resume_idempotence": "PASS",
+    "trace_repair": "PASS",
+    "illegal_transition_safety": "PASS"
+  },
+  "retained_candida_modified": false
+}

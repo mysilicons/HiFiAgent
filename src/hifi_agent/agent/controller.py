@@ -219,9 +219,10 @@ class AgentController:
         if artifact is None:
             raise ToolExecutionError("Active assembly artifact is absent from Agent state")
         try:
-            self.tools.run_post_qc(artifact)
+            metrics = self.tools.run_post_qc(artifact)
         except ToolExecutionError as exc:
             return self._tool_failure(state, f"POST_QC:{artifact.run_id}", exc)
+        state.active_metrics = metrics
         state.active_metrics_path = (
             self.run_dir / "03_post_qc" / artifact.run_id / "assembly_metrics.json"
         )
@@ -237,8 +238,10 @@ class AgentController:
         artifact = state.active_artifact
         if artifact is None:
             raise RuleEvaluationError("Cannot evaluate without an active assembly artifact")
+        metrics = state.active_metrics
+        if metrics is None:
+            raise RuleEvaluationError("Cannot evaluate without retained post-QC metrics")
         try:
-            metrics = self.tools.run_post_qc(artifact)
             decision = self.tools.evaluate(metrics, state.completed_run_ids)
         except ToolExecutionError as exc:
             return self._tool_failure(state, f"EVALUATE:{artifact.run_id}", exc)

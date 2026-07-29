@@ -1,448 +1,274 @@
 # HiFi Agent
 
-HiFi Agent V1 是一个针对单样本真核 PacBio HiFi 基因组项目的受限组装助手。它验证明确的用户输入，运行确定性质量控制和组装工作流，将工具输出规范化为结构化指标，应用可审核的规则进行 hifiasm 参数决策，并生成包含证据、风险和来源的可重复报告。
+HiFi Agent 是一个面向单样本 PacBio HiFi 真核基因组组装的受控分析助手。它把输入验证、组装前质控、hifiasm 组装、组装后评价、专家规则决策、有限候选比较和最终报告组织成可重复的命令行流程。
 
-V1 故意保守。系统必须在没有 LLM 的情况下工作：Nextflow 运行固定的工作流步骤，Python 解析器产生稳定的 JSON，规则引擎可以接受、停止或提出少量白名单的 hifiasm 候选者。任何可选的 RAG/LLM 层仅限于对已合法操作的解释和排序；它不得创建 shell 命令或引入不支持的参数。
+项目的核心目标是：在可审计的边界内帮助用户判断一次 HiFi-only 组装是否足够可靠，或者是否需要停止复核、有限重试或生成解释报告。规则引擎是参数决策的权威；可选 RAG/LLM 只用于解释和证据组织，不直接生成 shell 命令或越过参数白名单。
 
-## 十分钟快速开始
+## 功能特性
 
-无需下载测序数据即可运行真实规则引擎和全部九个便携边界场景：
+- 单样本 PacBio HiFi FASTQ / FASTQ.GZ 输入验证。
+- Nextflow DSL2 本地工作流，覆盖 pre-QC、k-mer 分析、hifiasm baseline 组装和 post-QC。
+- 结构化解析 seqkit、NanoPlot、GenomeScope、QUAST、BUSCO、Merqury、mapping QC 和 hifiasm 日志。
+- 基于版本化 YAML 规则的 `BASELINE`、`RETRY`、`STOP` 决策。
+- 受预算限制的候选组装比较，只允许安全白名单参数。
+- Markdown、JSON、TSV 等可读和可机器处理的报告产物。
+- 可选 RAG/LLM 解释层，用于生成带来源的决策说明。
+- 无需测序数据的便携 demo，可快速验证安装和规则流程。
+
+## 适用范围
+
+HiFi Agent V1 支持：
+
+- 单个样本的一组或多组 PacBio HiFi reads。
+- 真核基因组 HiFi-only contig 组装。
+- 二倍体样本优先的保守评价流程。
+- Linux 本地执行。
+- CLI 优先的可重复运行。
+
+V1 不支持：
+
+- Hi-C 分相组装。
+- trio / parental reads 分型。
+- ONT ultra-long 辅助组装。
+- 染色体级 scaffolding。
+- 基因组注释或重复注释。
+- 无边界参数搜索。
+- 由 LLM 直接执行任意命令或决定参数。
+
+## 安装
+
+完整生物学工作流推荐使用 Conda 环境。该环境包含 Python、Nextflow、Java 和主要生物信息学工具。
+Git remote（规范远程仓库）为 `https://github.com/mysilicons/HiFiAgent.git`。
+
+```bash
+git clone https://github.com/mysilicons/HiFiAgent.git
+cd HiFiAgent
+
+conda env create -f environment.yml
+conda activate hifiAgent
+python -m pip install -e .
+
+hifi-agent --version
+```
+
+完整工作流需要 Linux。若只运行便携 demo，可以只使用 Python 3.12 虚拟环境：
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
-hifi-agent --version
+hifi-agent demo /tmp/hifi-agent-demo
+```
+
+## 快速开始
+
+运行无需测序数据的 demo：
+
+```bash
 hifi-agent demo /tmp/hifi-agent-demo
 sed -n '1,160p' /tmp/hifi-agent-demo/v1_benchmark.md
 ```
 
-预期结果是 `Scenarios passed: 9/9`。该命令验证 schema、规则、参数白名单、停止策略、
-重复一致性和报告输出，但不伪装成生物学组装。完整 Linux/Conda 工作流见
-[用户指南](docs/user_guide.md)，开发与测试见[开发者指南](docs/developer_guide.md)。
-
-## 架构与安全边界
-
-```mermaid
-flowchart LR
-  I[Sample YAML + HiFi FASTQ] --> V[Validation]
-  V --> N[Nextflow: QC + hifiasm]
-  N --> M[Typed metrics]
-  M --> R[Expert rules]
-  R --> C[Budgeted Agent]
-  C --> O[Bounded comparison]
-  R --> G[RAG / optional LLM explanation]
-  G -. no decision authority .-> C
-  C --> F[Report + provenance]
-  O --> F
-```
-
-规则是唯一的参数决策权威；LLM 不能生成 shell、增加候选或越过四参数白名单。详细职责边界
-见[架构说明](docs/architecture.md)和[规则目录](docs/rule_catalog.md)。
-
-## V1 范围
-
-支持：
-
-- 单样本 PacBio HiFi FASTQ 或 FASTQ.GZ 输入。
-- 每次运行一个样本的一个或多个读取文件。
-- 真核基因组组装，V1 针对二倍体样本优化。
-- 使用 hifiasm 的 HiFi-only contig 组装。
-- 通过 Nextflow DSL2 进行本地 Linux 执行。
-- CLI 优先操作。
-- JSON、TSV、Markdown 和可选 HTML 报告。
-
-V1 范围外：
-
-- Hi-C 分相组装。
-- 三联体分型。
-- ONT 超长辅助组装。
-- 自动多倍体参数优化。
-- 染色体级支架构建。
-- 基因组注释或重复注释。
-- 无界参数搜索。
-- 让 LLM 直接执行任意 shell 命令。
-
-## 开发基线
-
-- 操作系统目标：Linux。
-- 工作流引擎：Nextflow DSL2。
-- 主要 Python 环境：conda 环境 `hifiAgent`。
-- 分支模型：`main` 加上短期功能分支。
-- 项目板列：待办、进行中、审查、完成。
-- 问题标签：`workflow`、`parser`、`rule`、`agent`、`test`、`docs`。
-
-当前本地机器基线记录在 [docs/technical_baseline.md](docs/technical_baseline.md) 中。
-
-### 本地资源策略
-
-默认配置面向当前 512 逻辑 CPU、1 TiB 内存的服务器：工作流全局上限为 480 线程和
-960 GB 内存，给操作系统、Nextflow 和文件系统缓存预留 32 个逻辑 CPU 与 64 GB。
-hifiasm 使用全局上限；meryl、NanoPlot 和组装后 QC 按工具并行能力分级申请资源。
-`max_threads` 和 `max_memory_gb` 仍可在样本 YAML 的 `resources` 中覆盖；在其他机器上
-运行时应显式设置为该机器可安全提供的容量。
-
-## CLI
+预期报告中包含：
 
 ```text
-hifi-agent validate CONFIG
-hifi-agent plan CONFIG
-hifi-agent run CONFIG
-hifi-agent evaluate RUN_DIR
-hifi-agent optimize RUN_DIR
-hifi-agent report RUN_DIR
-hifi-agent benchmark --output-dir benchmark/reports
-hifi-agent demo demo_output
+Scenarios passed: 9/9
 ```
 
-CLI 入口已建立。`validate` 已接入阶段 2 配置验证；`run` 会先执行
-配置验证，再运行组装和阶段 7 评价；`evaluate` 可对已有 baseline 单独执行阶段 7；
-`plan` 命令目前仍是受控占位命令；`report` 已实现阶段 12 的完整报告输出；
-`benchmark` 和 `demo` 分别提供阶段 13 的真实数据验收与便携演示。
+该 demo 会执行真实 schema、规则引擎、参数白名单、停止策略和报告生成逻辑，但不会伪装成真实生物学组装。
 
-## 存储库布局
+## 配置样本
 
-```text
-configs/          运行时默认值和阈值
-workflow/         Nextflow DSL2 工作流和模块
-src/hifi_agent/   Python 包
-rules/            可审核的 YAML 规则定义
-docs/             项目范围、决策和用户/开发者文档
-examples/         小型配置和预期输出示例
-tests/            单元、集成、工作流、固定装置和黄金测试
-benchmark/        公共数据集注册和基准报告
+复制示例配置并修改为自己的样本路径：
+
+```bash
+cp examples/candida_sample_config.yaml sample.yaml
 ```
 
-## 第 0 阶段状态
-
-第 0 阶段本地交付物已存在：
-
-- `README.md`
-- `docs/project_scope.md`
-- `docs/decisions/0001-v1-scope.md`
-- `docs/technical_baseline.md`
-- `benchmark/datasets.yaml`
-- `.github/labels.yml`
-- `environment.yml`
-
-外部 GitHub 设置仍需要存储库所有者操作：创建远程存储库、导入标签、创建项目板和打开后续问题。
-
-## 第 1 阶段状态
-
-第 1 阶段本地交付物已存在：
-
-- `pyproject.toml`
-- `src/hifi_agent/` Python 包和计划模块目录
-- `tests/` 测试目录和 CLI 单元测试
-- `.pre-commit-config.yaml`
-- `.github/workflows/ci.yml`
-
-在 conda 环境 `hifiAgent` 中已验证：
-
-```text
-conda run -n hifiAgent pytest
-conda run -n hifiAgent ruff check .
-conda run -n hifiAgent ruff format --check .
-conda run -n hifiAgent mypy
-conda run -n hifiAgent hifi-agent --help
-```
-
-## 第 2 阶段状态
-
-第 2 阶段本地交付物已存在：
-
-- `src/hifi_agent/schemas/sample.py`
-- `src/hifi_agent/config.py`
-- `examples/candida_sample_config.yaml`
-- `tests/test_config_validation.py`
-
-`hifi-agent validate CONFIG` 当前会执行：
-
-- Pydantic `SampleConfig`、`ResourceConfig`、`AgentConfig` schema 校验；
-- `sample_id` 字符集校验；
-- FASTQ/FASTQ.GZ 路径存在性和文件类型校验；
-- gzip 完整性校验；
-- FASTQ 首条完整记录校验；
-- `outdir` 不得包含关键输入文件；
-- 线程、内存、重试轮数和候选数预算校验；
-- 明确拒绝 Hi-C、ONT、trio 和 ultra-long 等 V1 范围外字段；
-- 生成 `00_metadata/resolved_config.yaml`；
-- 生成 `00_metadata/input_checksums.tsv`；
-- 生成带有元数据摘要的 `00_metadata/validation_receipt.json`，工作流拒绝缺失 receipt 的运行；
-- 为 `hifi-agent run` 生成 `00_metadata/hifi_reads.list`，确保工作流使用已验证输入。
-
-已使用本地 `Candida_albicans/Candida_albicans_HIFI.fastq` 验证：
-
-```text
-conda run -n hifiAgent hifi-agent validate examples/candida_sample_config.yaml
-conda run -n hifiAgent hifi-agent run --resume examples/candida_sample_config.yaml
-```
-
-验证输出包含：
-
-- `results/Candida_albicans_phase2/00_metadata/resolved_config.yaml`
-- `results/Candida_albicans_phase2/00_metadata/input_checksums.tsv`
-
-## 第 3 阶段状态
-
-第 3 阶段本地交付物已存在：
-
-- `workflow/main.nf`
-- `workflow/nextflow.config`
-- `workflow/conf/base.config`
-- `workflow/conf/local.config`
-- `examples/candida_phase3.md`
-- `tests/workflow/test_phase3_workflow.py`
-- `tests/workflow/test_phase3_nextflow_execution.py`
-
-DSL2 工作流已经从阶段 3 的最小骨架扩展到阶段 4/5 的组装前 QC：
-
-- `FASTQ_PROBE`：检查 FASTQ 四行结构，统计 reads 数和总碱基数；
-- `SEQKIT_STATS`：运行 `seqkit stats -a -T`；
-- `NANOPLOT`：运行 NanoPlot 并生成 `NanoStats.txt` 与 HTML 图表；
-- `KMER_COUNT`：运行 meryl 全量 k-mer 计数并导出 histogram；
-- `GENOMESCOPE_SUMMARY`：条件性运行 GenomeScope 2.0；
-- `KMER_METRICS`：汇总 histogram 与 GenomeScope 结构化指标；
-- `RAW_METRICS`：生成组装前统一 JSON；
-- `WRITE_RUN_MANIFEST`：生成 `00_metadata/run_manifest.json`。
-
-已使用本地 `Candida_albicans/Candida_albicans_HIFI.fastq` 通过受验证的 CLI 入口
-验证 local profile：
-
-```text
-conda run -n hifiAgent hifi-agent run --resume examples/candida_sample_config.yaml
-```
-
-验证输出包含：
-
-- `results/Candida_albicans_phase2/00_metadata/run_manifest.json`
-- `results/Candida_albicans_phase2/01_pre_qc/fastq_probe/fastq_probe.tsv`
-- `results/Candida_albicans_phase2/logs/trace.txt`
-- `results/Candida_albicans_phase2/logs/timeline.html`
-- `results/Candida_albicans_phase2/logs/report.html`
-- `results/Candida_albicans_phase2/logs/dag.html`
-
-`-resume` 已验证，成功任务会以 cached 状态复用。运行 Nextflow 时默认使用
-`/home/gw/software/jdk21/bin/java`。
-
-`tests/workflow/test_nextflow_resume_acceptance.py` 会在第二个进程运行时终止 Nextflow，
-随后以 `-resume` 恢复，并断言已完成的第一步状态为 `CACHED`、发布结果未丢失。
-
-## 第 4 阶段状态
-
-第 4 阶段本地交付物已存在：
-
-- `workflow/main.nf` 中的 `SEQKIT_STATS`、`NANOPLOT` 和 `RAW_METRICS` process
-- `src/hifi_agent/parsers/seqkit.py`
-- `src/hifi_agent/parsers/nanoplot.py`
-- `src/hifi_agent/workflow_tools.py`
-- `tests/test_pre_qc_parsers.py`
-
-当前 workflow 会生成：
-
-- `results/<sample>/01_pre_qc/seqkit/seqkit_stats.tsv`
-- `results/<sample>/01_pre_qc/nanoplot/NanoStats.txt`
-- `results/<sample>/01_pre_qc/raw_metrics.json`
-
-`SEQKIT_STATS` 使用 `seqkit stats -a -T`。`NANOPLOT` process 真实调用 NanoPlot，
-输出 `NanoStats.txt`、HTML 报告和 read length 图；parser 只解析 `NanoStats.txt`，
-不解析 HTML 视觉内容。
-
-## 第 5 阶段状态
-
-第 5 阶段本地交付物已存在：
-
-- `workflow/main.nf` 中的 `KMER_COUNT`、`GENOMESCOPE_SUMMARY` 和 `KMER_METRICS` process
-- `src/hifi_agent/parsers/kmer.py`
-- `src/hifi_agent/parsers/genomescope.py`
-- `tests/test_pre_qc_parsers.py`
-
-当前 workflow 会生成：
-
-- `results/<sample>/01_pre_qc/kmer/kmer_histogram.tsv`
-- `results/<sample>/01_pre_qc/kmer/read.meryl/`
-- `results/<sample>/01_pre_qc/kmer/genomescope_summary.tsv`
-- `results/<sample>/01_pre_qc/kmer/kmer_metrics.json`
-
-k-mer 默认配置在 sample config 的 `kmer` 字段中：
+配置示例：
 
 ```yaml
+sample_id: My_sample
+hifi_reads:
+  - /absolute/path/to/reads.fastq.gz
+outdir: /absolute/path/to/results/My_sample
+species_name: Example species
+expected_genome_size: 14500000
+ploidy: 2
+busco_lineage: saccharomycetes_odb12
+kmer_reads: null
+reference_genome: null
+
+resources:
+  max_threads: 64
+  max_memory_gb: 256
+
+agent:
+  max_retry_rounds: 1
+  max_candidates_per_round: 2
+  max_tool_retries: 1
+  max_cpu_hours: 10000
+  max_walltime_hours: 168
+  objective: balanced
+
 kmer:
   k: 21
+  low_coverage_peak_threshold: 10.0
+
+mapping_qc:
+  min_read_length: 1000
+  min_mean_qscore: 20.0
+  coverage_window_size: 10000
 ```
 
-`KMER_COUNT` 使用 meryl 对全部 HiFi reads 计数并导出 histogram。V1 当前将 HiFi reads
-本身作为 k-mer 来源，标记为 `same_data_advisory`。coverage 优先使用用户提供的
-`expected_genome_size`；如果该值缺失且 GenomeScope 成功，则回退使用 GenomeScope
-估计的 `genome_size`；如果两者都不可用，则 `estimated_coverage` 为 `null` 并写入
-warning。`GENOMESCOPE_SUMMARY` 会条件性调用 GenomeScope；如果 GenomeScope 依赖缺失
-或拟合失败，只记录 `genomescope_model_status`、退出码和 warning，不编造 genome size、
-heterozygosity、repeat fraction 或 model fit。
-低覆盖峰阈值由 `kmer.low_coverage_peak_threshold` 配置，默认 10×。
-
-## 第 6 阶段状态
-
-第 6 阶段本地交付物已存在：
-
-- `workflow/main.nf` 中的 `HIFIASM_BASELINE` process
-- `src/hifi_agent/parsers/hifiasm_log.py`
-- `src/hifi_agent/workflow_tools.py` 中的 `hifiasm-manifest` helper
-- `tests/test_pre_qc_parsers.py` 中的 hifiasm log parser 测试
-
-baseline assembly 默认只设置 hifiasm 输出前缀和线程：
+如果 HiFi reads 和参考 genome 文件放在同一个数据目录中，可以直接分别指向这两个文件。例如：
 
 ```text
-hifiasm -o <sample_id>.baseline -t <cpus> <reads>
+Data/Candida_albicans/
+├── Candida_albicans_HiFi.fastq
+├── Candida_albicans_gnome.fasta
+└── hifiAgent/
+    └── Candida_albicans_config.yaml
 ```
 
-当前 workflow 会生成：
+此时配置文件位于 `hifiAgent/` 子目录，路径应写成：
 
-- `results/<sample>/02_assembly/baseline/gfa/*.gfa`
-- `results/<sample>/02_assembly/baseline/fasta/baseline.primary.fa`
-- `results/<sample>/02_assembly/baseline/fasta/baseline.hap1.fa`
-- `results/<sample>/02_assembly/baseline/fasta/baseline.hap2.fa`
-- `results/<sample>/02_assembly/baseline/bins/*.bin`
-- `results/<sample>/02_assembly/baseline/logs/hifiasm.stdout`
-- `results/<sample>/02_assembly/baseline/logs/hifiasm.stderr`
-- `results/<sample>/02_assembly/baseline/logs/hifiasm.time.txt`
-- `results/<sample>/02_assembly/baseline/metadata/assembly_manifest.json`
-
-`assembly_manifest.json` 记录 hifiasm 命令、版本、homozygous coverage threshold、
-runtime、peak RSS、GFA/FASTA/bin 输出位置和 warning。重跑时如果
-`02_assembly/baseline/bins/` 中已有相同 prefix 的 `.bin`，process 会先复制到工作目录，
-让 hifiasm 可以复用兼容中间文件。tiny workflow smoke test 可用 `--run_assembly false`
-跳过 assembly；正式样本默认运行 baseline assembly。
-
-复用候选现在通过带 SHA-256 的 `hifiasm_bin_reuse_candidates.tsv` 声明为工作流输入；
-验收要求 hifiasm 日志出现 `loaded corrected reads and overlaps from disk`。
-
-## 第 7 阶段状态
-
-第 7 阶段组装后多维 QC 已接入 `workflow/main.nf`：
-
-- `QUAST`：默认 reference-free；存在 `reference_genome` 时增加 reference-based 模式；
-  预期基因组不小于 100 Mb 时自动使用 `--large`；
-- `BUSCO_POST_QC`：优先使用显式 lineage，缺失时使用 `--auto-lineage-euk`，不存在的
-  数据集由 BUSCO 自动下载；
-- `MERQURY_POST_QC`：复用阶段 5 meryl 数据库，保留 QV、completeness 和 spectrum；
-- `MAPPING_POST_QC`：先按 `mapping_qc` 中的长度和平均 Q 值阈值过滤 reads，再使用
-  minimap2 `map-hifi`、samtools，以及 mosdepth 或
-  bedtools windows + `samtools bedcov` 统计覆盖；
-- `ASSEMBLY_METRICS`：生成统一的 `assembly_metrics.json`。
-
-四条评价支路分别捕获工具退出码；单个工具失败不会阻断其他指标，缺失值为 `null`。
-提供 `kmer_reads` 时标记 `independent_high_confidence`，否则标记
-`same_data_advisory` 并在结果中保留非独立性限制。
-BUSCO 自动谱系模式会从 specific summary 中记录实际 lineage，并保存 ODB 版本、
-数据集创建日期和 `dataset.cfg` 来源。最终 `metric_classes` 覆盖全部标量组装指标。
-
-```text
-hifi-agent run --resume CONFIG
-hifi-agent evaluate results/<sample_id>
+```yaml
+hifi_reads:
+  - ../Candida_albicans_HiFi.fastq
+reference_genome: ../Candida_albicans_gnome.fasta
+outdir: .
 ```
 
-`evaluate` 只运行阶段 7，不重跑 pre-QC 或 hifiasm。输出结构：
+相对路径会以配置文件所在目录为基准解析；不要再额外写一层重复的数据目录名。
 
-```text
-03_post_qc/baseline/
-├── assembly_metrics.json
-├── quast/
-├── busco/
-├── merqury/
-└── mapping/
+常用字段说明：
+
+| 字段 | 说明 |
+| --- | --- |
+| `sample_id` | 样本 ID，只允许字母、数字、下划线和短横线 |
+| `hifi_reads` | HiFi FASTQ / FASTQ.GZ 输入，可以是一条路径或路径列表 |
+| `outdir` | 当前样本的结果目录 |
+| `expected_genome_size` | 预期基因组大小，单位 bp |
+| `busco_lineage` | BUSCO lineage；缺失时可由 BUSCO 自动推断 |
+| `kmer_reads` | 可选独立 k-mer reads；缺失时复用 `hifi_reads` 并标记为 advisory |
+| `reference_genome` | 可选参考基因组，用于 reference-based 评价 |
+| `resources` | 本次运行允许使用的线程和内存上限 |
+| `agent` | 候选比较预算和目标偏好 |
+
+## 运行流程
+
+### 1. 验证输入
+
+```bash
+hifi-agent validate sample.yaml
 ```
 
-## 第 8 阶段规则决策
-
-阶段 8 使用版本化 YAML 专家规则和阈值，不依赖 LLM：
+验证会检查配置 schema、输入路径、FASTQ/GZIP 基本完整性、资源预算和 V1 禁止字段，并写入：
 
 ```text
-hifi-agent decide results/<sample_id>
+<outdir>/00_metadata/resolved_config.yaml
+<outdir>/00_metadata/input_checksums.tsv
+<outdir>/00_metadata/validation_receipt.json
 ```
 
-结果写入 `04_decisions/baseline/rule_decision.json`，只会产生 `BASELINE`、`STOP` 或
-`RETRY`。候选参数严格限制为 `purge_level`、`purge_similarity`、`hom_cov` 和
-`disable_post_join`。规则、阈值与冲突策略见
-[`docs/stage8_expert_rules.md`](docs/stage8_expert_rules.md)。
+### 2. 运行 baseline 组装和质控
 
-## 第 9 阶段 Agent 控制器
-
-对已完成阶段 1～8 的运行目录启动显式、无 LLM 控制器：
-
-```text
-hifi-agent agent results/<sample_id>
-hifi-agent agent results/<sample_id> --resume
+```bash
+hifi-agent run --resume sample.yaml
 ```
 
-状态快照、逐转移审计日志和执行摘要分别写入：
+该命令会运行验证后的 Nextflow 工作流，生成组装前 QC、k-mer 指标、hifiasm baseline 组装和组装后 QC 结果。中断后可继续使用 `--resume` 复用 Nextflow 缓存。
 
-```text
-05_agent/agent_state.json
-05_agent/decision_trace.jsonl
-05_agent/agent_summary.json
+### 3. 单独重新执行组装后评价
+
+如果已有 baseline 组装结果，可单独重新评价：
+
+```bash
+hifi-agent evaluate /absolute/path/to/results/My_sample
 ```
 
-控制器分别限制参数优化轮数、每轮候选数、工具失败重试、CPU-hour 和 walltime；参数
-指纹防止相同候选重复运行。工具失败只进入工具重试或 `FAILED_TOOL_EXECUTION`，不会被
-解释为生物学质量退化。状态与预算细节见
-[`docs/stage9_agent_controller.md`](docs/stage9_agent_controller.md)。
-严格验收证据见 [`docs/stage9_acceptance.md`](docs/stage9_acceptance.md)。
+### 4. 运行专家规则决策
 
-## 第 10 阶段 RAG 与受约束解释
+```bash
+hifi-agent decide /absolute/path/to/results/My_sample
+```
 
-构建 `document/` 本地知识索引，并对阶段 8 决策生成可追溯解释：
+决策结果写入：
 
 ```text
+<outdir>/04_decisions/baseline/rule_decision.json
+```
+
+### 5. 运行受控 Agent
+
+```bash
+hifi-agent agent --resume /absolute/path/to/results/My_sample
+```
+
+Agent 会读取已验证的输入、baseline 指标和规则决策，在预算范围内给出终态结果，并记录状态和决策轨迹。
+
+### 6. 可选候选比较
+
+默认只规划和比较受控候选，不执行真实候选工作流：
+
+```bash
+hifi-agent optimize /absolute/path/to/results/My_sample
+```
+
+如需执行真实候选工作流，必须显式授权：
+
+```bash
+hifi-agent optimize /absolute/path/to/results/My_sample --execute
+```
+
+中高风险候选需要额外确认：
+
+```bash
+hifi-agent optimize /absolute/path/to/results/My_sample \
+  --execute \
+  --confirm-medium-high-risk
+```
+
+### 7. 可选 RAG/LLM 解释
+
+先构建本地知识索引：
+
+```bash
 hifi-agent rag-index
-hifi-agent explain results/<sample_id> --no-llm
-hifi-agent explain results/<sample_id> --llm
 ```
 
-LLM 模式默认使用 `DEEPSEEK_API_KEY` 和 OpenAI 兼容的 `deepseek-v4-pro`。规则 decision、
-参数候选和阶段 9 预算始终不可修改；模型输出需通过 Schema、来源、参数、置信度和科学单位
-校验。输出包括 `explanation.json/.md`、`rag_comparison.json` 和带 source/chunk ID 的
-`rag_decision_trace.jsonl`。详见 [`docs/stage10_rag_llm.md`](docs/stage10_rag_llm.md) 与
-[`docs/stage10_acceptance.md`](docs/stage10_acceptance.md)。
+生成不调用 LLM 的本地解释：
 
-## 第 11 阶段有限闭环优化
+```bash
+hifi-agent explain /absolute/path/to/results/My_sample --no-llm
+```
 
-阶段 11 在阶段 8 专家规则明确授权 `RETRY` 时生成最多两个白名单候选，默认只允许一轮：
+如需使用 DeepSeek OpenAI-compatible API，可设置环境变量后启用 `--llm`：
+
+```bash
+export DEEPSEEK_API_KEY=...
+export DEEPSEEK_BASE_URL=https://api.deepseek.com
+export DEEPSEEK_MODEL=deepseek-v4-pro
+
+hifi-agent explain /absolute/path/to/results/My_sample --llm
+```
+
+解释层不会改变规则决策，不会新增候选参数，也不会生成可执行命令。
+
+### 8. 生成最终报告
+
+```bash
+hifi-agent report /absolute/path/to/results/My_sample
+```
+
+默认输出目录：
 
 ```text
-hifi-agent optimize results/<sample_id>
-hifi-agent optimize results/<sample_id> --execute --confirm-medium-high-risk
+<outdir>/05_report/
 ```
 
-真实执行入口会校验并重命名复用 baseline hifiasm `.bin`，然后让 candidate 经过与 baseline
-完全相同的 QUAST、BUSCO、Merqury、mapping 和 `ASSEMBLY_METRICS` 流程。比较器覆盖 size
-ratio、BUSCO、k-mer、mapping、coverage CV、N50 和 misassembly；被支配候选、工具失败和
-核心质量回退均不能被 N50 提升覆盖。输出位于 `05_agent/optimization/`。
-
-Candida albicans 人工异常由真实 baseline 指标及其 SHA-256 派生：
-
-```text
-hifi-agent synthesize-stage11-anomaly results/Candida_albicans_phase6
-hifi-agent optimize results/Candida_albicans_phase6 \
-  --scenario benchmark/perturbations/candida_albicans_stage11_closed_loop.json
-```
-
-该场景只用于闭环安全验收，并强制标注为 synthetic。详见
-[`docs/stage11_closed_loop.md`](docs/stage11_closed_loop.md) 与
-[`docs/stage11_acceptance.md`](docs/stage11_acceptance.md)。
-
-## 第 12 阶段报告系统
-
-从一个已有运行目录生成 Markdown、机器可读摘要、比较表、参数差异、来源清单、软件版本、
-复现命令和统一图表目录：
-
-```text
-hifi-agent report results/<sample_id>
-hifi-agent report results/<sample_id> --show-absolute-paths
-```
-
-默认隐藏本机绝对路径。失败或不完整运行也会生成报告，并将模块明确标记为 `FAILED`、
-`WARNING` 或 `NOT_RUN`；缺失指标写为 `null`/`NA (not available)`，不会伪装成 0。
-输出位于 `05_report/`：
+常见产物包括：
 
 ```text
 final_report.md
@@ -455,47 +281,112 @@ reproducible_commands.txt
 figures/
 ```
 
-用于报告验收的 Candida albicans 人工异常通过真实 baseline 指标确定性派生，并在文件和
-报告中强制标注为 synthetic，不能作为科学结果：
+## CLI 命令速查
 
 ```text
-hifi-agent synthesize-report-anomaly results/Candida_albicans_phase6
-hifi-agent report results/Candida_albicans_phase6 \
-  --scenario benchmark/perturbations/candida_albicans_quality_regression.json \
-  --output-dir results/Candida_albicans_phase6/05_report_synthetic
+hifi-agent --version                         显示版本
+hifi-agent validate CONFIG                   验证样本配置和输入
+hifi-agent run [--resume] CONFIG             运行完整 baseline 工作流
+hifi-agent evaluate RUN_DIR                  重新执行 post-QC
+hifi-agent decide RUN_DIR                    运行专家规则决策
+hifi-agent agent [--resume] RUN_DIR          运行或恢复受控 Agent
+hifi-agent optimize RUN_DIR                  运行有限候选规划和比较
+hifi-agent rag-index                         构建本地 RAG 知识索引
+hifi-agent explain RUN_DIR [--no-llm]        生成规则和 RAG 解释
+hifi-agent report RUN_DIR                    生成最终报告
+hifi-agent benchmark --fixtures-only         运行便携 benchmark
+hifi-agent demo OUTPUT_DIR                   运行无数据 demo
 ```
 
-实现说明与严格验收证据见 [`docs/stage12_reporting.md`](docs/stage12_reporting.md) 和
-[`docs/stage12_acceptance.md`](docs/stage12_acceptance.md)。
+## 输出目录
 
-## 第 13 阶段测试、Benchmark 与消融
+一次典型运行会在 `outdir` 下生成以下目录：
 
-```bash
-pytest --cov --cov-report=term-missing --cov-fail-under=80
-hifi-agent benchmark --output-dir benchmark/reports \
-  --real-run-dir results/Candida_albicans_phase6
+```text
+00_metadata/     解析后的配置、输入校验、校验 receipt、运行 manifest
+01_pre_qc/       FASTQ、seqkit、NanoPlot、k-mer 和 GenomeScope 指标
+02_assembly/     hifiasm baseline 组装、FASTA/GFA/bin、命令 manifest
+03_post_qc/      QUAST、BUSCO、Merqury、mapping 和聚合评价指标
+04_decisions/    专家规则决策、RAG 证据和解释
+05_agent/        Agent 状态、轨迹、预算和候选比较
+05_report/       最终 Markdown/JSON/TSV 报告
+logs/            Nextflow trace、timeline、report 和 DAG
 ```
 
-当前验收为 199 passed、12 个显式条件测试 skipped，安全关键范围覆盖率 82.06%。十个自动
-场景全部通过，不存在 hifiasm 参数率为 0%，重复一致率为 100%。公开结果见
-[`benchmark/reports/v1_benchmark.md`](benchmark/reports/v1_benchmark.md)，包含默认 hifiasm、
-固定 pipeline、规则系统、规则+RAG/LLM 四种方法，以及去除 RAG、仅看 N50、去除工具失败
-门禁三组消融。真实案例使用 FASTQ 头部记录的 `SRR23724250` 和参考序列 `CP128823.1`；
-人工扰动均明确标为非科学结果。
+大型测序数据、工作流缓存和结果目录不应提交到 Git。
 
-## 第 14 阶段发布候选
+## 项目框架
 
-V1.0.0 本地发布物包括 [CHANGELOG](CHANGELOG.md)、[CITATION](CITATION.cff)、
-[发布说明](docs/releases/v1.0.0.md)、[发布清单](docs/release_checklist.md)、
-[演示](docs/demo.md)和[面试问答](docs/interview_qa.md)。`main` 与 `v1.0.0` 发布标签已推送到
-[`mysilicons/HiFiAgent`](https://github.com/mysilicons/HiFiAgent)。正式 GitHub Release：
-[`v1.0.0`](https://github.com/mysilicons/HiFiAgent/releases/tag/v1.0.0)。发布后状态审计记录在
-[`docs/stage14_acceptance.md`](docs/stage14_acceptance.md)。
+```text
+.
+├── src/hifi_agent/          Python 主包和 CLI
+│   ├── agent/               受控 Agent、状态和工具接口
+│   ├── benchmarking/        便携 demo 与 benchmark 场景
+│   ├── executors/           Nextflow 执行封装
+│   ├── optimization/        有限候选规划和比较
+│   ├── parsers/             生物信息学工具输出解析器
+│   ├── rag/                 本地索引、检索和解释安全层
+│   ├── reporting/           报告数据收集和渲染
+│   ├── rules/               专家规则加载和决策
+│   └── schemas/             样本配置和指标模型
+├── workflow/                Nextflow DSL2 工作流与 profile
+├── rules/                   V1 专家规则 YAML
+├── configs/                 默认阈值和知识库配置
+├── document/                RAG 可引用的工具文档和论文
+├── examples/                示例样本配置
+├── docs/                    用户说明、架构说明和演示材料
+├── benchmark/               benchmark 数据集登记和报告目录
+├── environment.yml          Conda 环境定义
+├── pyproject.toml           Python 包配置
+├── CITATION.cff             引用信息
+├── LICENSE                  开源许可证
+└── README.md                项目说明
+```
 
-## V1 限制
+## 主要依赖
 
-- 仅支持单样本、HiFi-only、二倍体导向的 contig 组装。
-- 不支持 Hi-C、trio、ONT、多倍体自动优化、scaffolding 或注释。
-- 同源 HiFi reads 的 k-mer 指标属于 advisory evidence，不等同独立验证。
-- RAG/LLM 只能解释，API 故障不会改变规则决定。
-- Candida Stage 11 候选是从真实 baseline 指标派生的显式 synthetic 安全测试，不能用于科研。
+完整工作流依赖 `environment.yml` 中固定的工具版本，主要包括：
+
+- Python 3.12
+- OpenJDK 21
+- Nextflow
+- seqkit
+- NanoPlot
+- meryl
+- hifiasm
+- gfatools
+- QUAST
+- BUSCO
+- Merqury
+- minimap2
+- samtools
+- bedtools
+
+## 结果解读
+
+规则决策只输出三类结果：
+
+- `BASELINE`：当前 baseline 证据足够支持保留默认组装。
+- `RETRY`：允许在预算内比较少量白名单参数候选。
+- `STOP`：输入、指标、工具结果或证据冲突需要人工复核。
+
+`STOP` 不是程序失败；在覆盖不足、指标冲突或证据不完整时，停止复核是预期的保守行为。
+
+## 文档
+
+- [用户指南](docs/user_guide.md)
+- [架构说明](docs/architecture.md)
+- [规则目录](docs/rule_catalog.md)
+- [演示说明](docs/demo.md)
+
+## 引用
+
+如果你在研究或项目中使用 HiFi Agent，请引用本软件发布。引用元数据见 [CITATION.cff](CITATION.cff)。
+
+```text
+HiFi Agent contributors. HiFi Agent: a constrained PacBio HiFi assembly assistant. Version 1.0.0. 2026.
+```
+
+## 许可证
+
+本项目使用 MIT License，详见 [LICENSE](LICENSE)。

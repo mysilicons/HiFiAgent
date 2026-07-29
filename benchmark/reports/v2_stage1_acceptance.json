@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "accepted_at": "2026-07-15",
+  "stages": [0, 1],
+  "status": "PASS",
+  "quality_gates": {
+    "targeted_tests": {
+      "passed": 36,
+      "failed": 0
+    },
+    "workflow_and_contract_subset": {
+      "passed": 36,
+      "failed": 0
+    },
+    "full_pytest": {
+      "passed": 218,
+      "failed": 0,
+      "skipped": 13
+    },
+    "ruff_check": "PASS",
+    "ruff_format_check": "PASS",
+    "mypy": "PASS",
+    "coverage_percent": 81.44,
+    "coverage_required_percent": 80.0
+  },
+  "closed_defects": [
+    "V2-P0-001",
+    "V2-P0-002",
+    "V2-P0-003",
+    "V2-P2-002"
+  ],
+  "retained_candida_contract_audit": {
+    "status": "REJECTED_AS_EXPECTED",
+    "reason": "PARAMETER_CONTRACT_VIOLATION: Invalid value `true` for hifiasm parameter flag --hom-cov",
+    "artifact_modified": false
+  }
+}

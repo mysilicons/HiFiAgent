@@ -20,9 +20,10 @@ from hifi_agent.rag.models import (
     RagTraceEvent,
     RecommendedAction,
     RetrievalHit,
+    RetrievalTrace,
     RuleFacts,
 )
-from hifi_agent.rag.retriever import LocalRetriever, build_decision_query
+from hifi_agent.rag.retriever import LocalRetriever, authorized_parameters, build_decision_query
 from hifi_agent.rag.safety import expected_explanation_action, validate_llm_explanation
 from hifi_agent.rules.models import RuleDecision
 
@@ -46,6 +47,7 @@ def explain_run(
     client: StructuredLLMClient | None = None,
     top_k: int = 6,
     now: datetime | None = None,
+    actual_hifiasm_version: str | None = None,
 ) -> ExplanationBundle:
     """Retrieve evidence, optionally call DeepSeek, enforce safety, and write artifacts."""
     decision_path = run_dir / "04_decisions" / run_id / "rule_decision.json"
@@ -56,13 +58,20 @@ def explain_run(
     except (OSError, ValidationError) as exc:
         raise RuleEvaluationError(f"Rule decision is invalid: {decision_path}: {exc}") from exc
     index = load_knowledge_index(index_path)
-    retriever = LocalRetriever(index)
+    resolved_hifiasm_version, version_warning = _resolve_hifiasm_version(
+        run_dir,
+        run_id,
+        requested=actual_hifiasm_version,
+        fallback=index.target_hifiasm_version,
+    )
+    retriever = LocalRetriever(index, actual_hifiasm_version=resolved_hifiasm_version)
     query, parameter_tags, problem_tags = build_decision_query(decision)
     hits = retriever.retrieve(
         query,
         top_k=top_k,
         parameter_tags=parameter_tags,
         problem_tags=problem_tags,
+        input_tags={"pacbio_hifi"},
     )
     hits = _supplement_decision_evidence(retriever, hits, decision, top_k)
     hits = _ensure_parameter_evidence(retriever, hits, parameter_tags, top_k)
@@ -110,8 +119,46 @@ def explain_run(
             safety_checks=checks,
             api_metadata=result.metadata,
         )
-    _write_artifacts(run_dir, run_id, bundle, now=now or datetime.now(UTC))
+    retrieval_trace = retriever.trace(
+        query,
+        hits,
+        parameter_tags=parameter_tags,
+        problem_tags=problem_tags,
+        input_tags={"pacbio_hifi"},
+    )
+    if version_warning is not None:
+        retrieval_trace.warnings = sorted({*retrieval_trace.warnings, version_warning})
+    _write_artifacts(
+        run_dir,
+        run_id,
+        bundle,
+        retrieval_trace=retrieval_trace,
+        now=now or datetime.now(UTC),
+    )
     return bundle
+
+
+def _resolve_hifiasm_version(
+    run_dir: Path,
+    run_id: str,
+    *,
+    requested: str | None,
+    fallback: str,
+) -> tuple[str, str | None]:
+    """Prefer the executed assembly manifest version and record fallback uncertainty."""
+    if requested:
+        return requested, None
+    manifest_path = run_dir / f"02_assembly/{run_id}/metadata/assembly_manifest.json"
+    if manifest_path.is_file():
+        try:
+            payload = json.loads(manifest_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            payload = None
+        if isinstance(payload, dict):
+            observed = payload.get("hifiasm_version")
+            if isinstance(observed, str) and observed:
+                return observed, None
+    return fallback, "ACTUAL_HIFIASM_VERSION_UNAVAILABLE_USING_INDEX_TARGET"
 
 
 def _ensure_parameter_evidence(
@@ -122,7 +169,7 @@ def _ensure_parameter_evidence(
 ) -> list[RetrievalHit]:
     merged = {hit.chunk_id: hit for hit in hits}
     for parameter in sorted(parameter_tags):
-        if any(parameter in hit.parameter_tags for hit in merged.values()):
+        if any(parameter in hit.authorized_parameter_tags for hit in merged.values()):
             continue
         for hit in retriever.retrieve(
             f"hifiasm {parameter.replace('_', ' ')} parameter official documentation",
@@ -174,7 +221,7 @@ def _supplement_decision_evidence(
 
 
 def _parameters_have_evidence(parameters: set[str], hits: list[RetrievalHit]) -> bool:
-    return all(any(parameter in hit.parameter_tags for hit in hits) for parameter in parameters)
+    return parameters <= authorized_parameters(hits)
 
 
 def _build_user_prompt(decision: RuleDecision, hits: list[RetrievalHit]) -> str:
@@ -202,6 +249,9 @@ def _build_user_prompt(decision: RuleDecision, hits: list[RetrievalHit]) -> str:
             "tool": hit.tool,
             "section": hit.section,
             "parameter_tags": hit.parameter_tags,
+            "authorized_parameter_tags": hit.authorized_parameter_tags,
+            "version_match": hit.version_match,
+            "warnings": hit.warnings,
             "text": hit.text[:1400],
         }
         for hit in hits
@@ -265,7 +315,9 @@ def _rules_only_explanation(
     parameter_explanations = []
     for parameter in sorted(parameters):
         sources = list(
-            dict.fromkeys(hit.source_id for hit in hits if parameter in hit.parameter_tags)
+            dict.fromkeys(
+                hit.source_id for hit in hits if parameter in hit.authorized_parameter_tags
+            )
         )
         parameter_explanations.append(
             ParameterExplanation(
@@ -310,6 +362,7 @@ def _write_artifacts(
     run_id: str,
     bundle: ExplanationBundle,
     *,
+    retrieval_trace: RetrievalTrace,
     now: datetime,
 ) -> None:
     output_dir = run_dir / "04_decisions" / run_id
@@ -317,6 +370,7 @@ def _write_artifacts(
     explanation_path = output_dir / "explanation.json"
     comparison_path = output_dir / "rag_comparison.json"
     trace_path = output_dir / "rag_decision_trace.jsonl"
+    retrieval_trace_path = output_dir / "retrieval_trace.json"
     explanation_path.write_text(bundle.model_dump_json(indent=2) + "\n")
     comparison = RagComparison(
         decision_id=bundle.rule_facts.decision_id,
@@ -332,6 +386,7 @@ def _write_artifacts(
         safety_status="PASS",
     )
     comparison_path.write_text(comparison.model_dump_json(indent=2) + "\n")
+    retrieval_trace_path.write_text(retrieval_trace.model_dump_json(indent=2) + "\n")
     trace = RagTraceEvent(
         timestamp=now,
         decision_id=bundle.rule_facts.decision_id,

@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 
 SAMPLE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -50,6 +50,28 @@ class AgentConfig(BaseModel):
     objective: Literal["balanced", "contiguity", "completeness", "conservative"] = "balanced"
 
 
+class OptimizationConfig(BaseModel):
+    """V2 bounded optimization and decision-mode configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    max_rounds: int = Field(default=3, ge=0, le=3)
+    max_candidates_per_round: int = Field(default=1, ge=1, le=2)
+    plateau_rounds: Literal[1] = 1
+    decision_mode: Literal["rules_only", "hybrid", "llm_disabled"] = "rules_only"
+    require_llm: bool = False
+    confirm_risk_level: Literal["medium_high", "high"] = "medium_high"
+    retain_all_attempts: Literal[True] = True
+
+    @model_validator(mode="after")
+    def validate_required_llm_mode(self) -> "OptimizationConfig":
+        """A required LLM is meaningful only in hybrid mode."""
+        if self.require_llm and self.decision_mode != "hybrid":
+            raise ValueError("require_llm=true requires decision_mode=hybrid")
+        return self
+
+
 class KmerConfig(BaseModel):
     """K-mer analysis settings for advisory pre-QC metrics."""
 
@@ -86,6 +108,7 @@ class SampleConfig(BaseModel):
     reference_genome: Path | None = None
     resources: ResourceConfig = Field(default_factory=ResourceConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
+    optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
     kmer: KmerConfig = Field(default_factory=KmerConfig)
     mapping_qc: MappingQcConfig = Field(default_factory=MappingQcConfig)
 

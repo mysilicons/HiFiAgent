@@ -1,0 +1,32 @@
+{
+  "schema_version": "2.0",
+  "accepted_at": "2026-07-15",
+  "stages": [4],
+  "status": "PASS",
+  "quality_gates": {
+    "focused_tests_passed": 94,
+    "full_pytest_passed": 259,
+    "full_pytest_failed": 0,
+    "full_pytest_skipped": 13,
+    "ruff_check": "PASS",
+    "ruff_format_check": "PASS",
+    "mypy": "PASS",
+    "coverage_percent": 83.21,
+    "coverage_required_percent": 80.0
+  },
+  "acceptance": {
+    "byte_stable_bundle": "PASS",
+    "numeric_units_complete": "PASS",
+    "busco_percentage_preserved": "PASS",
+    "unknown_genome_size_safe": "PASS",
+    "low_confidence_kmer_blocks_hom_cov": "PASS",
+    "llm_summary_sanitized": "PASS",
+    "controller_materialization_idempotent": "PASS"
+  },
+  "retained_candida": {
+    "modified": false,
+    "hom_cov_authorized": false,
+    "kmer_peak_confidence": "low",
+    "llm_summary_contains_workspace_path": false
+  }
+}

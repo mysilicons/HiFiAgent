@@ -50,3 +50,6 @@ knowledge/index.json
 .DS_Store
 *.swp
 *.swo
+
+# DataSets
+Data/

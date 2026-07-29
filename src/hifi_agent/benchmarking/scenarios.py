@@ -14,10 +14,11 @@ def _context(**overrides: object) -> RuleContext:
         "expected_genome_size": 100_000_000,
         "estimated_genome_size": 100_000_000,
         "estimated_coverage": 30.0,
-        "kmer_source": "same_data_advisory",
+        "kmer_source": "independent_high_confidence",
         "kmer_peak_depth": 30.0,
         "genomescope_model_status": "success",
         "kmer_warning_count": 0,
+        "kmer_peak_authorizes_hom_cov": True,
         "hifiasm_hom_cov": 30.0,
         "assembly_size": 100_000_000,
         "assembly_size_ratio": 1.0,
@@ -91,7 +92,8 @@ def stage13_scenarios() -> list[BenchmarkScenario]:
             expected_parameters=[{"hom_cov": 30}],
             expected_rule_id="HOM_COV_TRUSTED_KMER_CONFLICT",
             construction=(
-                "hifiasm threshold doubled while trusted same-data k-mer peak is held fixed."
+                "hifiasm threshold doubled while an independently derived trusted k-mer peak "
+                "is held fixed."
             ),
         ),
         BenchmarkScenario(

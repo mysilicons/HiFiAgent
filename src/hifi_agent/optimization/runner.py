@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from hifi_agent.agent.models import AssemblyConfig, PreQcMetrics
 from hifi_agent.agent.planner import Planner
 from hifi_agent.exceptions import InputValidationError, RuleEvaluationError, ToolExecutionError
+from hifi_agent.executors.hifiasm_contract import validate_hifiasm_command_contract
 from hifi_agent.optimization.comparator import METRIC_SPECS, CandidateComparator
 from hifi_agent.optimization.engine import select_optimization_outcome
 from hifi_agent.optimization.models import CandidateAssessment, OptimizationResult
@@ -109,6 +110,18 @@ def run_stage11_optimization(
         else:
             path = resolved_run / f"03_post_qc/{candidate.run_id}/assembly_metrics.json"
             if path.is_file():
+                command_path = (
+                    resolved_run
+                    / "02_assembly"
+                    / candidate.run_id
+                    / "metadata"
+                    / "hifiasm_command.txt"
+                )
+                try:
+                    validate_hifiasm_command_contract(candidate, command_path)
+                except ToolExecutionError as exc:
+                    assessments.append(_failed_assessment(candidate, str(exc)))
+                    continue
                 metrics = _load_metrics(path, candidate.run_id)
                 metrics_source = f"${{RUN_DIR}}/03_post_qc/{candidate.run_id}/assembly_metrics.json"
             else:

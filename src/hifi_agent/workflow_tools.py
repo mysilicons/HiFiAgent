@@ -623,9 +623,10 @@ def _format_optional(value: object) -> str:
 
 
 def _optional_int(value: str) -> int | None:
-    if value == "":
+    normalized = str(value).strip().lower()
+    if normalized in {"", "none", "null", "true", "false"}:
         return None
-    return int(value)
+    return int(normalized)
 
 
 def _select_genome_size_for_coverage(

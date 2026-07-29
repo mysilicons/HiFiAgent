@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from hifi_agent.rules.models import RiskLevel, RuleDecision
+from hifi_agent.schemas.metrics import AssemblyMetrics
 
 
 class AgentState(StrEnum):
@@ -198,6 +199,7 @@ class AgentRunState(BaseModel):
     baseline_config: AssemblyConfig | None = None
     active_config: AssemblyConfig | None = None
     active_artifact: AssemblyArtifact | None = None
+    active_metrics: AssemblyMetrics | None = None
     active_metrics_path: Path | None = None
     latest_decision: RuleDecision | None = None
     pending_candidates: list[AssemblyConfig] = Field(default_factory=list)

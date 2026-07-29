@@ -19,6 +19,15 @@ agent:
   max_cpu_hours: 10000
   max_walltime_hours: 168
   objective: balanced
+optimization:
+  enabled: true
+  max_rounds: 3
+  max_candidates_per_round: 1
+  plateau_rounds: 1
+  decision_mode: rules_only
+  require_llm: false
+  confirm_risk_level: medium_high
+  retain_all_attempts: true
 kmer:
   k: 21
   low_coverage_peak_threshold: 10.0

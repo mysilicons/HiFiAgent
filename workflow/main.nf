@@ -48,7 +48,7 @@ process FASTQ_PROBE {
 
     publishDir "${params.outdir}/01_pre_qc/fastq_probe",
         mode: params.publish_mode,
-        overwrite: true
+        overwrite: params.publish_overwrite
 
     input:
     tuple val(sample_id), path(reads)
@@ -110,7 +110,7 @@ process SEQKIT_STATS {
 
     publishDir "${params.outdir}/01_pre_qc/seqkit",
         mode: params.publish_mode,
-        overwrite: true
+        overwrite: params.publish_overwrite
 
     input:
     tuple val(sample_id), path(reads)
@@ -139,7 +139,7 @@ process NANOPLOT {
 
     publishDir "${params.outdir}/01_pre_qc/nanoplot",
         mode: params.publish_mode,
-        overwrite: true
+        overwrite: params.publish_overwrite
 
     input:
     tuple val(sample_id), path(reads)
@@ -170,7 +170,7 @@ process KMER_COUNT {
 
     publishDir "${params.outdir}/01_pre_qc/kmer",
         mode: params.publish_mode,
-        overwrite: true
+        overwrite: params.publish_overwrite
 
     input:
     tuple val(sample_id), path(reads)
@@ -207,7 +207,7 @@ process GENOMESCOPE_SUMMARY {
 
     publishDir "${params.outdir}/01_pre_qc/kmer",
         mode: params.publish_mode,
-        overwrite: true
+        overwrite: params.publish_overwrite
 
     input:
     tuple val(sample_id), path(meryl_db), path(histogram)
@@ -234,7 +234,7 @@ process KMER_METRICS {
 
     publishDir "${params.outdir}/01_pre_qc/kmer",
         mode: params.publish_mode,
-        overwrite: true
+        overwrite: params.publish_overwrite
 
     input:
     tuple val(sample_id), path(histogram), path(genomescope_summary)
@@ -263,7 +263,7 @@ process RAW_METRICS {
 
     publishDir "${params.outdir}/01_pre_qc",
         mode: params.publish_mode,
-        overwrite: true
+        overwrite: params.publish_overwrite
 
     input:
     tuple val(sample_id), path(seqkit_stats), path(nanostats), path(kmer_metrics)
@@ -291,7 +291,7 @@ process HIFIASM_BASELINE {
 
     publishDir "${params.outdir}/02_assembly/${assemblyRunId}",
         mode: params.publish_mode,
-        overwrite: true
+        overwrite: params.publish_overwrite
 
     input:
     tuple val(sample_id), path(reads), path(raw_metrics), path(bin_reuse_manifest)
@@ -412,7 +412,7 @@ process QUAST {
 
     publishDir "${params.outdir}/03_post_qc/${assemblyRunId}/quast",
         mode: params.publish_mode,
-        overwrite: true
+        overwrite: params.publish_overwrite
 
     input:
     tuple val(sample_id), path(assembly_manifest), path(primary_fasta), val(reference_genome), val(expected_genome_size_value)
@@ -482,7 +482,7 @@ process BUSCO_POST_QC {
 
     publishDir "${params.outdir}/03_post_qc/${assemblyRunId}/busco",
         mode: params.publish_mode,
-        overwrite: true
+        overwrite: params.publish_overwrite
 
     input:
     tuple val(sample_id), path(assembly_manifest), path(primary_fasta), val(busco_lineage_value), val(busco_download_path_value), val(busco_timeout_minutes_value)
@@ -559,7 +559,7 @@ process MERQURY_POST_QC {
 
     publishDir "${params.outdir}/03_post_qc/${assemblyRunId}/merqury",
         mode: params.publish_mode,
-        overwrite: true
+        overwrite: params.publish_overwrite
 
     input:
     tuple val(sample_id), path(assembly_manifest), path(primary_fasta), path(meryl_db), path(histogram), val(kmer_source_value)
@@ -626,7 +626,7 @@ process MAPPING_POST_QC {
 
     publishDir "${params.outdir}/03_post_qc/${assemblyRunId}/mapping",
         mode: params.publish_mode,
-        overwrite: true
+        overwrite: params.publish_overwrite
 
     input:
     tuple val(sample_id), path(assembly_manifest), path(primary_fasta), path(reads), val(coverage_window_size_value)
@@ -750,7 +750,7 @@ process ASSEMBLY_METRICS {
 
     publishDir "${params.outdir}/03_post_qc/${assemblyRunId}",
         mode: params.publish_mode,
-        overwrite: true
+        overwrite: params.publish_overwrite
 
     input:
     tuple val(sample_id), path(quast_metrics), path(busco_metrics), path(merqury_metrics), path(mapping_metrics), val(expected_genome_size_value)
@@ -778,7 +778,7 @@ process WRITE_RUN_MANIFEST {
 
     publishDir "${params.outdir}/00_metadata",
         mode: params.publish_mode,
-        overwrite: true
+        overwrite: params.publish_overwrite
 
     input:
     tuple val(sample_id), path(metrics), path(raw_metrics)

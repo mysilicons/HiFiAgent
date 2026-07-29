@@ -1,0 +1,56 @@
+{
+  "schema_version": "2.0",
+  "stage": 6,
+  "date": "2026-07-29",
+  "result": "PASS",
+  "sample_id": "Candida_albicans",
+  "input_kind": "sanitized_real_qc_assembly_metrics_and_governed_retrieval",
+  "provider": "deepseek",
+  "model": "deepseek-v4-pro",
+  "response_id": "e7377a3b-312e-417a-9f2a-472f77feb665",
+  "llm_status": "SUCCESS",
+  "terminal_status": "CANDIDATES_APPROVED",
+  "prompt_sha256": "a99856e853ec287ba19348a874cc2e56d65678b36dbe5bcb1597a10cf4a4bf16",
+  "proposal_output_sha256": "e45ace004493531c632d8b44720be1cfe73da5247e5cc0892102728e7be5e085",
+  "usage": {
+    "prompt_tokens": 5855,
+    "completion_tokens": 2115,
+    "total_tokens": 7970
+  },
+  "retrieved_source_ids": [
+    "hifi_agent_rules",
+    "hifiasm_faq",
+    "hifiasm_parameters",
+    "quast_paper"
+  ],
+  "retrieved_chunk_count": 8,
+  "raw_proposal_count": 0,
+  "approved_candidates": [
+    {
+      "candidate_id": "disable_post_join",
+      "origin": "rule",
+      "parameters": {
+        "disable_post_join": true
+      },
+      "parameter_fingerprint": "22e8817baaef124ad72862795a9bb3685b50994d6ec1952f419290dcd86ecfae"
+    }
+  ],
+  "rejected_proposal_count": 0,
+  "safety_checks": [
+    "RULE_STOP_AUTHORITY_ENFORCED",
+    "STRICT_JSON_SCHEMA_VALIDATED",
+    "PARAMETER_WHITELIST_AND_RANGE_VALIDATED",
+    "SOURCE_AND_METRIC_IDS_VALIDATED",
+    "EVIDENCE_CONFIDENCE_CAP_ENFORCED",
+    "NO_SHELL_FLAG_PATH_OR_ENVIRONMENT_TEXT",
+    "GLOBAL_PARAMETER_FINGERPRINT_DEDUPLICATION",
+    "CANDIDATE_AND_RISK_BUDGET_ENFORCED",
+    "APPROVAL_DOES_NOT_MUTATE_PARAMETERS"
+  ],
+  "sensitive_payload_checks": {
+    "fastq_or_reference_sequence_sent": false,
+    "absolute_workspace_path_present": false,
+    "api_key_present": false,
+    "environment_variable_present": false
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "schema_version": "2.0",
+  "catalog_version": "2.0.0",
+  "catalog_sha256": "2938473a7303321f2a288195809d6f108b8dd561050bf68f2565c2055a22a211",
+  "target_hifiasm_version": "0.25.0-r726",
+  "built_at": "2026-07-15T00:00:00Z",
+  "source_ids": [
+    "hifiasm_docs_index",
+    "hifiasm_faq",
+    "hifiasm_output",
+    "hifiasm_parameters",
+    "hifiasm_hifi_only",
+    "hifiasm_hic",
+    "hifiasm_trio",
+    "busco_manual",
+    "busco_paper",
+    "quast_manual",
+    "quast_paper",
+    "merqury_readme",
+    "merqury_paper",
+    "genomescope_readme",
+    "genomescope_paper",
+    "hifi_agent_rules"
+  ],
+  "source_sha256": {
+    "hifiasm_docs_index": "6cb9cd88e002ab20d0163ccc1c4d144c1c43ca11037eba6bb89691a5a8d08ed8",
+    "hifiasm_faq": "eec75ffc6776914f3556c1abd24723c89782294160f1ac700e442fc00e8a1296",
+    "hifiasm_output": "63b943c85584ce28505155c1fee8269d311ffc98063168e564ba5322f1ad72fb",
+    "hifiasm_parameters": "0405ca9b1c1bfa5cb13ccd3bef775fb6fdd55214ba3b7d5daa8305ca7197b15c",
+    "hifiasm_hifi_only": "d45278776ef5ce7ce7c5b55eb4498cea166ffecb2a15613568c05418cc61e8dc",
+    "hifiasm_hic": "60ff4e8b7b0d1bfe5dffa5425332d08f9d4e9e19a3eddf196b96eb2bc695e50d",
+    "hifiasm_trio": "ad5e11a45617f60c98853b0bea04073d9a5892f50bc38ee15e8812e6ad2d2e7d",
+    "busco_manual": "510a6d4863c52af515c2f93aa8aea4546f8fefb669052b2a6ed9fa3065632faf",
+    "busco_paper": "7ac02334d74c25062cb4c941afac8cb853ad6b69133792e29f65c3cb3cf9dccf",
+    "quast_manual": "45c1e9b8ae36f89cdfcae4d20769a8f4a3600af7717b95631c6a2df67f75e0a7",
+    "quast_paper": "f06dcb6b0c03dc5202a9f6943b5b064bf17f335fc2e9fd295e8dc70a24de19c5",
+    "merqury_readme": "0bbf1004c551d33a2dd35b9665e003b5692443e29ea6f92c43e7f7f54fc7da4e",
+    "merqury_paper": "3b0b49041d72854d77a916408631a67b1ef12a772c9478b049a46e4d923c08f5",
+    "genomescope_readme": "6443344b28913ac9257425a1acaaae6e13d5d6c510d66dd372f2275b23d5daa7",
+    "genomescope_paper": "e19ce422c03e1fbd1e0cda5207e3f81620f693766a48085b26ac591c427a3d57",
+    "hifi_agent_rules": "9294bcf03647a676e0f9a8de1efe0de00ff67ddffbde731fb46ebc0e8da37659"
+  },
+  "parameter_evidence": {
+    "purge_level": [
+      "hifiasm_faq",
+      "hifiasm_hifi_only",
+      "hifiasm_parameters"
+    ],
+    "purge_similarity": [
+      "hifiasm_faq",
+      "hifiasm_parameters"
+    ],
+    "hom_cov": [
+      "hifiasm_faq",
+      "hifiasm_output",
+      "hifiasm_parameters"
+    ],
+    "disable_post_join": [
+      "hifiasm_faq",
+      "hifiasm_parameters"
+    ]
+  },
+  "chunk_count": 336,
+  "quarantined_chunk_count": 0,
+  "warnings": []
+}

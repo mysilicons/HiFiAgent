@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -42,10 +44,18 @@ def source(
         title=title or source_id,
         file_path=Path(f"document/{source_id}.md"),
         url=f"https://example.test/{source_id}",
+        version_url=f"https://example.test/{source_id}/version",
         content_kind="official_documentation",
         tool="hifiasm",
         tool_version="test",
         scope=scope,  # type: ignore[arg-type]
+        evidence_level="official",
+        authorization_scope=["parameter_guidance"],
+        expected_sha256="0" * 64,
+        review_after="2027-07-13",  # type: ignore[arg-type]
+        parameter_tags=["purge_similarity"],
+        problem_tags=["assembly_size", "duplication"],
+        input_tags=["pacbio_hifi"],
     )
 
 
@@ -63,6 +73,8 @@ def local_index(*, unrelated: bool = False) -> KnowledgeIndex:
     )
     return KnowledgeIndex(
         catalog_version="test",
+        catalog_sha256="f" * 64,
+        target_hifiasm_version="test",
         built_at=datetime(2026, 7, 13, tzinfo=UTC),
         sources=[
             IndexedSource(
@@ -70,12 +82,14 @@ def local_index(*, unrelated: bool = False) -> KnowledgeIndex:
                 sha256="0" * 64,
                 byte_size=100,
                 chunk_count=1,
+                stale=False,
             ),
             IndexedSource(
                 source=excluded_source,
                 sha256="1" * 64,
                 byte_size=100,
                 chunk_count=1,
+                stale=False,
             ),
         ],
         chunks=[
@@ -87,6 +101,8 @@ def local_index(*, unrelated: bool = False) -> KnowledgeIndex:
                 ordinal=1,
                 parameter_tags=[] if unrelated else ["purge_similarity"],
                 problem_tags=[] if unrelated else ["assembly_size", "duplication"],
+                input_tags=["pacbio_hifi"],
+                authorized_parameter_tags=[] if unrelated else ["purge_similarity"],
             ),
             KnowledgeChunk(
                 chunk_id="hifiasm_hic_bbbbbbbbbbbb",
@@ -199,11 +215,17 @@ def test_source_catalog_records_url_date_version_and_scope() -> None:
     catalog = load_source_catalog()
 
     assert len(catalog.sources) == 16
+    assert catalog.schema_version == "2.0"
+    assert catalog.target_hifiasm_version == "0.25.0-r726"
     assert str(catalog.retrieved_at) == "2026-07-13"
     for item in catalog.sources:
         assert item.url
+        assert item.version_url
         assert item.tool_version
         assert item.file_path
+        assert item.evidence_level
+        assert item.authorization_scope
+        assert len(item.expected_sha256) == 64
 
 
 def test_indexer_slices_markdown_by_problem_and_parameter(tmp_path: Path) -> None:
@@ -213,23 +235,34 @@ def test_indexer_slices_markdown_by_problem_and_parameter(tmp_path: Path) -> Non
         "# Hifiasm guide\n\nGeneral assembly information.\n\n"
         "## Purge duplication\n\nIf assembly size is large, review haplotig similarity with -s.\n"
     )
-    catalog = {
-        "schema_version": "1.0",
+    catalog: dict[str, Any] = {
+        "schema_version": "2.0",
         "catalog_version": "test",
         "retrieved_at": "2026-07-13",
+        "target_hifiasm_version": "test",
+        "required_parameters": ["purge_similarity"],
         "sources": [
             {
                 "source_id": "guide",
                 "title": "Guide",
                 "file_path": "document/guide.md",
                 "url": "https://example.test/guide",
+                "version_url": "https://example.test/guide/version",
                 "content_kind": "official_documentation",
                 "tool": "hifiasm",
                 "tool_version": "test",
                 "scope": "v1",
+                "evidence_level": "official",
+                "authorization_scope": ["parameter_guidance"],
+                "expected_sha256": "PLACEHOLDER",
+                "review_after": "2027-07-13",
+                "parameter_tags": ["purge_similarity"],
+                "problem_tags": ["assembly_size", "duplication"],
+                "input_tags": ["pacbio_hifi"],
             }
         ],
     }
+    catalog["sources"][0]["expected_sha256"] = hashlib.sha256(document.read_bytes()).hexdigest()
     catalog_path = tmp_path / "catalog.yaml"
     catalog_path.write_text(yaml.safe_dump(catalog))
 
@@ -245,6 +278,8 @@ def test_indexer_slices_markdown_by_problem_and_parameter(tmp_path: Path) -> Non
     purge_chunks = [chunk for chunk in index.chunks if "purge_similarity" in chunk.parameter_tags]
     assert len(purge_chunks) == 1
     assert "assembly_size" in purge_chunks[0].problem_tags
+    assert purge_chunks[0].authorized_parameter_tags == ["purge_similarity"]
+    assert (tmp_path / "index_manifest.json").is_file()
 
 
 def test_retrieval_is_deterministic_and_excludes_out_of_scope_sources() -> None:
@@ -414,6 +449,9 @@ def test_prompt_injection_attempt_to_invent_parameter_is_rejected(tmp_path: Path
 
 def test_valid_structured_llm_explanation_writes_trace_and_comparison(tmp_path: Path) -> None:
     run_dir, index_path = write_inputs(tmp_path, decision(), local_index())
+    manifest = run_dir / "02_assembly/baseline/metadata/assembly_manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({"hifiasm_version": "observed-old-version"}))
     client = FakeClient(valid_output())
 
     bundle = explain_run(
@@ -434,6 +472,13 @@ def test_valid_structured_llm_explanation_writes_trace_and_comparison(tmp_path: 
     )
     assert trace.source_ids == ["hifiasm_faq"]
     assert trace.safety_status == "PASS"
+    retrieval_trace = json.loads((output_dir / "retrieval_trace.json").read_text())
+    assert retrieval_trace["result_source_ids"] == ["hifiasm_faq"]
+    assert retrieval_trace["actual_hifiasm_version"] == "observed-old-version"
+    assert retrieval_trace["warnings"] == [
+        "HIFIASM_VERSION_MISMATCH:hifiasm_faq:test!=observed-old-version"
+    ]
+    assert set(retrieval_trace["result_source_ids"]) <= set(retrieval_trace["catalog_source_ids"])
     markdown = (output_dir / "explanation.md").read_text()
     assert "Rule facts (authoritative)" in markdown
     assert "LLM explanation (non-authoritative)" in markdown
@@ -450,7 +495,10 @@ def test_llm_disabled_keeps_project_operational(tmp_path: Path) -> None:
 
 
 def test_no_evidence_forces_insufficient_without_calling_llm(tmp_path: Path) -> None:
-    run_dir, index_path = write_inputs(tmp_path, decision(), local_index(unrelated=True))
+    unauthorized_index = local_index()
+    unauthorized_index.chunks[0].authorized_parameter_tags = []
+    retry = decision("RETRY", candidate=CandidateParameters(purge_similarity=0.5))
+    run_dir, index_path = write_inputs(tmp_path, retry, unauthorized_index)
     client = FakeClient(valid_output())
 
     bundle = explain_run(run_dir, index_path=index_path, client=client)

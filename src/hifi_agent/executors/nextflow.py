@@ -14,6 +14,7 @@ import yaml
 from hifi_agent.agent.models import AssemblyConfig
 from hifi_agent.config import verify_recorded_input_checksums, verify_validation_receipt
 from hifi_agent.exceptions import ToolExecutionError
+from hifi_agent.executors.hifiasm_contract import write_hifiasm_contract_artifacts
 from hifi_agent.schemas.sample import SampleConfig
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -75,8 +76,6 @@ def run_phase3_workflow(config: SampleConfig, *, resume: bool = False) -> Nextfl
             str(validation_receipt),
             "--bin_reuse_manifest",
             str(bin_reuse_manifest),
-            "--expected_genome_size",
-            str(config.expected_genome_size or ""),
             "--kmer_k",
             str(config.kmer.k),
             "--kmer_low_coverage_peak_threshold",
@@ -85,10 +84,6 @@ def run_phase3_workflow(config: SampleConfig, *, resume: bool = False) -> Nextfl
             str(kmer_reads_manifest),
             "--kmer_source",
             kmer_source,
-            "--reference_genome",
-            str(config.reference_genome or ""),
-            "--busco_lineage",
-            config.busco_lineage or "",
             "--mapping_min_read_length",
             str(config.mapping_qc.min_read_length),
             "--mapping_min_mean_qscore",
@@ -101,6 +96,13 @@ def run_phase3_workflow(config: SampleConfig, *, resume: bool = False) -> Nextfl
             str(config.resources.max_memory_gb),
         ]
     )
+    _append_optional_nextflow_param(
+        command,
+        "--expected_genome_size",
+        config.expected_genome_size,
+    )
+    _append_optional_nextflow_param(command, "--reference_genome", config.reference_genome)
+    _append_optional_nextflow_param(command, "--busco_lineage", config.busco_lineage)
 
     try:
         subprocess.run(command, cwd=PROJECT_ROOT, env=_nextflow_environment(), check=True)
@@ -170,12 +172,6 @@ def run_post_qc_workflow(run_dir: Path, *, resume: bool = True) -> NextflowRunRe
             str(run_dir),
             "--validation_receipt",
             str(validation_receipt),
-            "--expected_genome_size",
-            str(config.expected_genome_size or ""),
-            "--reference_genome",
-            str(config.reference_genome or ""),
-            "--busco_lineage",
-            config.busco_lineage or "",
             "--mapping_min_read_length",
             str(config.mapping_qc.min_read_length),
             "--mapping_min_mean_qscore",
@@ -196,6 +192,13 @@ def run_post_qc_workflow(run_dir: Path, *, resume: bool = True) -> NextflowRunRe
             str(kmer_histogram),
         ]
     )
+    _append_optional_nextflow_param(
+        command,
+        "--expected_genome_size",
+        config.expected_genome_size,
+    )
+    _append_optional_nextflow_param(command, "--reference_genome", config.reference_genome)
+    _append_optional_nextflow_param(command, "--busco_lineage", config.busco_lineage)
     try:
         subprocess.run(command, cwd=PROJECT_ROOT, env=_nextflow_environment(), check=True)
     except subprocess.CalledProcessError as exc:
@@ -251,11 +254,8 @@ def run_candidate_workflow(
     )
     if len(reuse_manifest.read_text().splitlines()) <= 1:
         raise ToolExecutionError("No compatible baseline hifiasm .bin files are available")
-    candidate_config_path = (
-        resolved_run / "02_assembly" / candidate.run_id / "metadata/assembly_config.json"
-    )
-    candidate_config_path.parent.mkdir(parents=True, exist_ok=True)
-    candidate_config_path.write_text(candidate.model_dump_json(indent=2) + "\n")
+    candidate_metadata = resolved_run / "02_assembly" / candidate.run_id / "metadata"
+    write_hifiasm_contract_artifacts(candidate, candidate_metadata)
 
     nextflow = _find_nextflow()
     kmer_source = "independent_high_confidence" if config.kmer_reads else "same_data_advisory"
@@ -283,8 +283,6 @@ def run_candidate_workflow(
             str(parameters.purge_level),
             "--hifiasm_purge_similarity",
             str(parameters.purge_similarity),
-            "--hifiasm_hom_cov",
-            str(parameters.hom_cov or ""),
             "--hifiasm_disable_post_join",
             str(parameters.disable_post_join).lower(),
             "--reads_manifest",
@@ -303,12 +301,6 @@ def run_candidate_workflow(
             str(resolved_run),
             "--validation_receipt",
             str(validation_receipt),
-            "--expected_genome_size",
-            str(config.expected_genome_size or ""),
-            "--reference_genome",
-            str(config.reference_genome or ""),
-            "--busco_lineage",
-            config.busco_lineage or "",
             "--mapping_min_read_length",
             str(config.mapping_qc.min_read_length),
             "--mapping_min_mean_qscore",
@@ -321,6 +313,14 @@ def run_candidate_workflow(
             str(config.resources.max_memory_gb),
         ]
     )
+    _append_optional_nextflow_param(
+        command,
+        "--expected_genome_size",
+        config.expected_genome_size,
+    )
+    _append_optional_nextflow_param(command, "--hifiasm_hom_cov", parameters.hom_cov)
+    _append_optional_nextflow_param(command, "--reference_genome", config.reference_genome)
+    _append_optional_nextflow_param(command, "--busco_lineage", config.busco_lineage)
     try:
         subprocess.run(command, cwd=PROJECT_ROOT, env=_nextflow_environment(), check=True)
     except subprocess.CalledProcessError as exc:
@@ -337,6 +337,12 @@ def run_candidate_workflow(
         raise ToolExecutionError(
             f"Candidate workflow completed without required output(s): {', '.join(missing_outputs)}"
         )
+    command_path = candidate_metadata / "hifiasm_command.txt"
+    write_hifiasm_contract_artifacts(
+        candidate,
+        candidate_metadata,
+        command_path=command_path,
+    )
     return NextflowRunResult(tuple(command), resolved_run, reads_manifest)
 
 
@@ -350,6 +356,21 @@ def _find_nextflow() -> str:
         return str(local_nextflow)
 
     raise ToolExecutionError("Nextflow executable was not found on PATH.")
+
+
+def _append_optional_nextflow_param(
+    command: list[str],
+    name: str,
+    value: object | None,
+) -> None:
+    """Append a Nextflow parameter only when it has a real value.
+
+    Passing a bare Nextflow flag without a value is interpreted as boolean true,
+    which is not equivalent to a missing optional numeric parameter.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return
+    command.extend([name, str(value)])
 
 
 def _write_path_manifest(output: Path, paths: list[Path]) -> Path:

@@ -5,8 +5,9 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from typing import Literal, cast
 
-from hifi_agent.rag.models import KnowledgeIndex, RetrievalHit
+from hifi_agent.rag.models import KnowledgeIndex, ParameterName, RetrievalHit, RetrievalTrace
 from hifi_agent.rules.models import RuleDecision
 
 TOKEN_PATTERN = re.compile(r"--?[a-z][a-z0-9-]*|[a-z0-9]+", re.I)
@@ -29,11 +30,15 @@ QUERY_EXPANSIONS = {
 class LocalRetriever:
     """Rank V1-scoped chunks using deterministic BM25 and tag boosts."""
 
-    def __init__(self, index: KnowledgeIndex) -> None:
+    def __init__(self, index: KnowledgeIndex, *, actual_hifiasm_version: str | None = None) -> None:
         self.index = index
+        self.actual_hifiasm_version = actual_hifiasm_version or index.target_hifiasm_version
         self._source_by_id = {indexed.source.source_id: indexed.source for indexed in index.sources}
+        self._indexed_by_id = {indexed.source.source_id: indexed for indexed in index.sources}
         self._chunks = [
-            chunk for chunk in index.chunks if self._source_by_id[chunk.source_id].scope == "v1"
+            chunk
+            for chunk in index.chunks
+            if self._source_by_id[chunk.source_id].scope == "v1" and not chunk.quarantined
         ]
         self._tokens = [_tokenize(f"{chunk.section} {chunk.text}") for chunk in self._chunks]
         self._document_frequency = Counter(
@@ -50,6 +55,7 @@ class LocalRetriever:
         top_k: int = 6,
         parameter_tags: set[str] | None = None,
         problem_tags: set[str] | None = None,
+        input_tags: set[str] | None = None,
     ) -> list[RetrievalHit]:
         """Return top positive-scoring chunks with complete source provenance."""
         if top_k < 1:
@@ -59,11 +65,16 @@ class LocalRetriever:
             return []
         requested_parameters = parameter_tags or set()
         requested_problems = problem_tags or set()
+        requested_inputs = input_tags or set()
         scored: list[tuple[float, int]] = []
         for index, (chunk, tokens) in enumerate(zip(self._chunks, self._tokens, strict=True)):
             score = self._bm25(query_tokens, tokens)
-            score += 1.5 * len(requested_parameters.intersection(chunk.parameter_tags))
+            score += 1.5 * len(requested_parameters.intersection(chunk.authorized_parameter_tags))
             score += 0.75 * len(requested_problems.intersection(chunk.problem_tags))
+            score += 0.5 * len(requested_inputs.intersection(chunk.input_tags))
+            source = self._source_by_id[chunk.source_id]
+            if source.tool.lower() == "hifiasm":
+                score *= 1.25 if source.tool_version == self.actual_hifiasm_version else 0.5
             if score > 0:
                 scored.append((score, index))
         scored.sort(key=lambda item: (-item[0], self._chunks[item[1]].chunk_id))
@@ -71,6 +82,22 @@ class LocalRetriever:
         for score, index in scored[:top_k]:
             chunk = self._chunks[index]
             source = self._source_by_id[chunk.source_id]
+            indexed_source = self._indexed_by_id[chunk.source_id]
+            version_match: Literal["exact", "mismatch", "not_applicable"]
+            if source.tool.lower() == "hifiasm":
+                version_match = (
+                    "exact" if source.tool_version == self.actual_hifiasm_version else "mismatch"
+                )
+            else:
+                version_match = "not_applicable"
+            warnings = []
+            if version_match == "mismatch":
+                warnings.append(
+                    f"HIFIASM_VERSION_MISMATCH:{source.source_id}:"
+                    f"{source.tool_version}!={self.actual_hifiasm_version}"
+                )
+            if indexed_source.stale:
+                warnings.append(f"STALE_SOURCE:{source.source_id}")
             hits.append(
                 RetrievalHit(
                     chunk_id=chunk.chunk_id,
@@ -84,9 +111,38 @@ class LocalRetriever:
                     score=round(score, 8),
                     parameter_tags=chunk.parameter_tags,
                     problem_tags=chunk.problem_tags,
+                    input_tags=chunk.input_tags,
+                    authorized_parameter_tags=chunk.authorized_parameter_tags,
+                    evidence_level=source.evidence_level,
+                    authorization_scope=source.authorization_scope,
+                    version_match=version_match,
+                    warnings=warnings,
                 )
             )
         return hits
+
+    def trace(
+        self,
+        query: str,
+        hits: list[RetrievalHit],
+        *,
+        parameter_tags: set[str] | None = None,
+        problem_tags: set[str] | None = None,
+        input_tags: set[str] | None = None,
+    ) -> RetrievalTrace:
+        """Create a catalog-bounded trace for an already finalized hit list."""
+        return RetrievalTrace(
+            catalog_version=self.index.catalog_version,
+            actual_hifiasm_version=self.actual_hifiasm_version,
+            query=query,
+            parameter_tags=[cast(ParameterName, item) for item in sorted(parameter_tags or set())],
+            problem_tags=sorted(problem_tags or set()),
+            input_tags=sorted(input_tags or set()),
+            catalog_source_ids=sorted(self._source_by_id),
+            result_source_ids=list(dict.fromkeys(hit.source_id for hit in hits)),
+            result_chunk_ids=[hit.chunk_id for hit in hits],
+            warnings=sorted({warning for hit in hits for warning in hit.warnings}),
+        )
 
     def _bm25(self, query_tokens: list[str], document_tokens: list[str]) -> float:
         frequencies = Counter(document_tokens)
@@ -131,6 +187,11 @@ def build_decision_query(decision: RuleDecision) -> tuple[str, set[str], set[str
     if "disable_post_join" in parameter_tags:
         problem_tags.add("structural_error")
     return " ".join(parts), parameter_tags, problem_tags
+
+
+def authorized_parameters(hits: list[RetrievalHit]) -> set[ParameterName]:
+    """Return the only parameters later proposal stages may expose to an LLM."""
+    return {parameter for hit in hits for parameter in hit.authorized_parameter_tags}
 
 
 def _infer_problem_tags(reason_code: str, tags: set[str]) -> None:

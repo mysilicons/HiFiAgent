@@ -9,6 +9,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from hifi_agent.exceptions import RuleEvaluationError
+from hifi_agent.qc import QcFeatureBundle
 from hifi_agent.schemas.metrics import AssemblyMetrics
 from hifi_agent.schemas.sample import SampleConfig
 
@@ -28,6 +29,7 @@ class RuleContext(BaseModel):
     kmer_peak_depth: float | None = None
     genomescope_model_status: str | None = None
     kmer_warning_count: int = 0
+    kmer_peak_authorizes_hom_cov: bool = False
     hifiasm_hom_cov: float | None = None
     assembly_size: int | None = None
     assembly_size_ratio: float | None = None
@@ -48,7 +50,8 @@ class RuleContext(BaseModel):
             self.expected_genome_size is not None or self.estimated_genome_size is not None
         )
         values["trusted_kmer_peak"] = (
-            self.kmer_source == "same_data_advisory"
+            self.kmer_peak_authorizes_hom_cov
+            and self.kmer_source == "independent_high_confidence"
             and self.genomescope_model_status == "success"
             and self.kmer_warning_count == 0
         )
@@ -63,7 +66,7 @@ class RuleContext(BaseModel):
         values["core_metrics_complete"] = all(
             value is not None
             for value in (
-                self.assembly_size_ratio,
+                self.assembly_size,
                 self.contig_n50,
                 self.busco_complete,
                 self.busco_duplicated,
@@ -99,6 +102,14 @@ def load_rule_context(run_dir: Path) -> RuleContext:
     except ValidationError as exc:
         raise RuleEvaluationError(f"Resolved sample config is invalid: {exc}") from exc
     raw = _read_object_json(required["raw_metrics"])
+    qc_feature_path = run_dir / "01_pre_qc/qc_feature_bundle.json"
+    kmer_peak_authorizes_hom_cov = False
+    if qc_feature_path.is_file():
+        try:
+            qc_features = QcFeatureBundle.model_validate_json(qc_feature_path.read_text())
+        except (OSError, ValidationError) as exc:
+            raise RuleEvaluationError(f"QC feature bundle is invalid: {exc}") from exc
+        kmer_peak_authorizes_hom_cov = qc_features.kmer_peak_authorizes_hom_cov
     manifest = _read_object_json(required["assembly_manifest"])
     try:
         assembly = AssemblyMetrics.model_validate_json(required["assembly_metrics"].read_text())
@@ -117,6 +128,7 @@ def load_rule_context(run_dir: Path) -> RuleContext:
         kmer_peak_depth=_optional_float(raw.get("kmer_peak_depth")),
         genomescope_model_status=_optional_string(raw.get("genomescope_model_status")),
         kmer_warning_count=_kmer_warning_count(raw.get("warnings")),
+        kmer_peak_authorizes_hom_cov=kmer_peak_authorizes_hom_cov,
         hifiasm_hom_cov=_optional_float(manifest.get("homozygous_coverage_threshold")),
         assembly_size=assembly.assembly_size,
         assembly_size_ratio=assembly.assembly_size_ratio,

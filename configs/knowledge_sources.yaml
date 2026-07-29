@@ -1,133 +1,251 @@
-schema_version: "1.0"
-catalog_version: "1.0.0"
+schema_version: "2.0"
+catalog_version: "2.0.0"
 retrieved_at: "2026-07-13"
+target_hifiasm_version: "0.25.0-r726"
+required_parameters: [purge_level, purge_similarity, hom_cov, disable_post_join]
 
 sources:
   - source_id: hifiasm_docs_index
     title: Hifiasm documentation index
     file_path: document/hifiasm_docs/index.md
     url: https://github.com/chhylp123/hifiasm/blob/master/docs/index.md
+    version_url: https://github.com/chhylp123/hifiasm/releases/tag/0.25.0
     content_kind: official_documentation
     tool: hifiasm
     tool_version: 0.25.0-r726
     scope: v1
+    evidence_level: official
+    authorization_scope: [context_only]
+    expected_sha256: 6cb9cd88e002ab20d0163ccc1c4d144c1c43ca11037eba6bb89691a5a8d08ed8
+    review_after: "2027-07-13"
+    problem_tags: [assembly_workflow]
+    input_tags: [pacbio_hifi]
   - source_id: hifiasm_faq
     title: Hifiasm FAQ
     file_path: document/hifiasm_docs/faq.md
     url: https://github.com/chhylp123/hifiasm/blob/master/docs/faq.md
+    version_url: https://github.com/chhylp123/hifiasm/releases/tag/0.25.0
     content_kind: official_documentation
     tool: hifiasm
     tool_version: 0.25.0-r726
     scope: v1
+    evidence_level: official
+    authorization_scope: [parameter_guidance]
+    expected_sha256: eec75ffc6776914f3556c1abd24723c89782294160f1ac700e442fc00e8a1296
+    review_after: "2027-07-13"
+    parameter_tags: [purge_level, purge_similarity, hom_cov, disable_post_join]
+    problem_tags: [duplication, coverage, structural_error]
+    input_tags: [pacbio_hifi, diploid, inbred]
   - source_id: hifiasm_output
     title: Interpreting hifiasm output
     file_path: document/hifiasm_docs/interpreting-output.md
     url: https://github.com/chhylp123/hifiasm/blob/master/docs/interpreting-output.md
+    version_url: https://github.com/chhylp123/hifiasm/releases/tag/0.25.0
     content_kind: official_documentation
     tool: hifiasm
     tool_version: 0.25.0-r726
     scope: v1
+    evidence_level: official
+    authorization_scope: [parameter_guidance, metric_interpretation]
+    expected_sha256: 63b943c85584ce28505155c1fee8269d311ffc98063168e564ba5322f1ad72fb
+    review_after: "2027-07-13"
+    parameter_tags: [hom_cov]
+    problem_tags: [coverage, assembly_size]
+    input_tags: [pacbio_hifi]
   - source_id: hifiasm_parameters
     title: Hifiasm parameter reference
     file_path: document/hifiasm_docs/parameter-reference.md
     url: https://github.com/chhylp123/hifiasm/blob/master/docs/parameter-reference.md
+    version_url: https://github.com/chhylp123/hifiasm/releases/tag/0.25.0
     content_kind: official_documentation
     tool: hifiasm
     tool_version: 0.25.0-r726
     scope: v1
+    evidence_level: official
+    authorization_scope: [parameter_guidance]
+    expected_sha256: 0405ca9b1c1bfa5cb13ccd3bef775fb6fdd55214ba3b7d5daa8305ca7197b15c
+    review_after: "2027-07-13"
+    parameter_tags: [purge_level, purge_similarity, hom_cov, disable_post_join]
+    problem_tags: [duplication, coverage, structural_error]
+    input_tags: [pacbio_hifi]
   - source_id: hifiasm_hifi_only
     title: Hifiasm HiFi-only assembly
     file_path: document/hifiasm_docs/pa-assembly.md
     url: https://github.com/chhylp123/hifiasm/blob/master/docs/pa-assembly.md
+    version_url: https://github.com/chhylp123/hifiasm/releases/tag/0.25.0
     content_kind: official_documentation
     tool: hifiasm
     tool_version: 0.25.0-r726
     scope: v1
+    evidence_level: official
+    authorization_scope: [parameter_guidance, context_only]
+    expected_sha256: d45278776ef5ce7ce7c5b55eb4498cea166ffecb2a15613568c05418cc61e8dc
+    review_after: "2027-07-13"
+    parameter_tags: [purge_level]
+    problem_tags: [duplication]
+    input_tags: [pacbio_hifi]
   - source_id: hifiasm_hic
     title: Hifiasm Hi-C integrated assembly
     file_path: document/hifiasm_docs/hic-assembly.md
     url: https://github.com/chhylp123/hifiasm/blob/master/docs/hic-assembly.md
+    version_url: https://github.com/chhylp123/hifiasm/releases/tag/0.25.0
     content_kind: official_documentation
     tool: hifiasm
     tool_version: 0.25.0-r726
     scope: out_of_scope_reference
+    evidence_level: official
+    authorization_scope: [context_only]
+    expected_sha256: 60ff4e8b7b0d1bfe5dffa5425332d08f9d4e9e19a3eddf196b96eb2bc695e50d
+    review_after: "2027-07-13"
+    problem_tags: [phasing]
+    input_tags: [pacbio_hifi, hic]
   - source_id: hifiasm_trio
     title: Hifiasm trio-binning assembly
     file_path: document/hifiasm_docs/trio-assembly.md
     url: https://github.com/chhylp123/hifiasm/blob/master/docs/trio-assembly.md
+    version_url: https://github.com/chhylp123/hifiasm/releases/tag/0.25.0
     content_kind: official_documentation
     tool: hifiasm
     tool_version: 0.25.0-r726
     scope: out_of_scope_reference
+    evidence_level: official
+    authorization_scope: [context_only]
+    expected_sha256: ad5e11a45617f60c98853b0bea04073d9a5892f50bc38ee15e8812e6ad2d2e7d
+    review_after: "2027-07-13"
+    problem_tags: [phasing]
+    input_tags: [pacbio_hifi, trio]
   - source_id: busco_manual
     title: BUSCO v6.1.0 user guide
     file_path: document/BUSCO_manual.html
     url: https://busco.ezlab.org/busco_userguide.html
+    version_url: https://busco.ezlab.org/busco_userguide.html
     content_kind: official_documentation
     tool: BUSCO
     tool_version: 6.1.0
     scope: v1
+    evidence_level: official
+    authorization_scope: [metric_interpretation]
+    expected_sha256: 510a6d4863c52af515c2f93aa8aea4546f8fefb669052b2a6ed9fa3065632faf
+    review_after: "2027-07-13"
+    problem_tags: [completeness, duplication]
+    input_tags: [genome_assembly]
   - source_id: busco_paper
     title: BUSCO Update paper
     file_path: document/BUSCO_paper.pdf
     url: https://doi.org/10.1093/molbev/msab199
+    version_url: https://doi.org/10.1093/molbev/msab199
     content_kind: peer_reviewed_paper
     tool: BUSCO
     tool_version: publication
     scope: v1
+    evidence_level: peer_reviewed
+    authorization_scope: [metric_interpretation]
+    expected_sha256: 7ac02334d74c25062cb4c941afac8cb853ad6b69133792e29f65c3cb3cf9dccf
+    review_after: "2027-07-13"
+    problem_tags: [completeness, duplication]
+    input_tags: [genome_assembly]
   - source_id: quast_manual
     title: QUAST 5.3.0 manual
     file_path: document/QUAST_manual.html
     url: https://quast.sourceforge.net/docs/manual.html
+    version_url: https://quast.sourceforge.net/docs/manual.html
     content_kind: official_documentation
     tool: QUAST
     tool_version: 5.3.0
     scope: v1
+    evidence_level: official
+    authorization_scope: [metric_interpretation]
+    expected_sha256: 45c1e9b8ae36f89cdfcae4d20769a8f4a3600af7717b95631c6a2df67f75e0a7
+    review_after: "2027-07-13"
+    problem_tags: [structural_error, contiguity]
+    input_tags: [genome_assembly]
   - source_id: quast_paper
     title: QUAST quality assessment paper
     file_path: document/QUAST_paper.pdf
     url: https://doi.org/10.1093/bioinformatics/btt086
+    version_url: https://doi.org/10.1093/bioinformatics/btt086
     content_kind: peer_reviewed_paper
     tool: QUAST
     tool_version: publication
     scope: v1
+    evidence_level: peer_reviewed
+    authorization_scope: [metric_interpretation]
+    expected_sha256: f06dcb6b0c03dc5202a9f6943b5b064bf17f335fc2e9fd295e8dc70a24de19c5
+    review_after: "2027-07-13"
+    problem_tags: [structural_error, contiguity]
+    input_tags: [genome_assembly]
   - source_id: merqury_readme
     title: Merqury official repository README
     file_path: document/merqury_README.md
     url: https://github.com/marbl/merqury
+    version_url: https://github.com/marbl/merqury/releases
     content_kind: official_documentation
     tool: Merqury
     tool_version: repository_snapshot
     scope: v1
+    evidence_level: official
+    authorization_scope: [metric_interpretation]
+    expected_sha256: 0bbf1004c551d33a2dd35b9665e003b5692443e29ea6f92c43e7f7f54fc7da4e
+    review_after: "2027-07-13"
+    problem_tags: [kmer_quality, completeness]
+    input_tags: [pacbio_hifi, genome_assembly]
   - source_id: merqury_paper
     title: Merqury reference-free assembly evaluation paper
     file_path: document/merqury_paper.pdf
     url: https://doi.org/10.1186/s13059-020-02134-9
+    version_url: https://doi.org/10.1186/s13059-020-02134-9
     content_kind: peer_reviewed_paper
     tool: Merqury
     tool_version: publication
     scope: v1
+    evidence_level: peer_reviewed
+    authorization_scope: [metric_interpretation]
+    expected_sha256: 3b0b49041d72854d77a916408631a67b1ef12a772c9478b049a46e4d923c08f5
+    review_after: "2027-07-13"
+    problem_tags: [kmer_quality, completeness]
+    input_tags: [genome_assembly]
   - source_id: genomescope_readme
     title: GenomeScope 2.0 official repository README
     file_path: document/genomescopeREADME.md
     url: https://github.com/tbenavi1/genomescope2.0
+    version_url: https://github.com/tbenavi1/genomescope2.0/releases
     content_kind: official_documentation
     tool: GenomeScope
     tool_version: "2.0"
     scope: v1
+    evidence_level: official
+    authorization_scope: [metric_interpretation]
+    expected_sha256: 6443344b28913ac9257425a1acaaae6e13d5d6c510d66dd372f2275b23d5daa7
+    review_after: "2027-07-13"
+    problem_tags: [genome_size, coverage, ploidy]
+    input_tags: [kmer_histogram]
   - source_id: genomescope_paper
     title: GenomeScope 2.0 paper
     file_path: document/genomescope_paper.pdf
     url: https://doi.org/10.1038/s41467-020-14998-3
+    version_url: https://doi.org/10.1038/s41467-020-14998-3
     content_kind: peer_reviewed_paper
     tool: GenomeScope
     tool_version: publication
     scope: v1
+    evidence_level: peer_reviewed
+    authorization_scope: [metric_interpretation]
+    expected_sha256: e19ce422c03e1fbd1e0cda5207e3f81620f693766a48085b26ac591c427a3d57
+    review_after: "2027-07-13"
+    problem_tags: [genome_size, coverage, ploidy]
+    input_tags: [kmer_histogram]
   - source_id: hifi_agent_rules
     title: HiFi Agent Stage 8 expert rule standard
     file_path: docs/stage8_expert_rules.md
     url: local://docs/stage8_expert_rules.md
+    version_url: local://docs/stage8_expert_rules.md
     content_kind: project_rule_documentation
     tool: HiFiAgent
     tool_version: "1.0.0"
     scope: v1
+    evidence_level: project_internal
+    authorization_scope: [context_only]
+    expected_sha256: 9294bcf03647a676e0f9a8de1efe0de00ff67ddffbde731fb46ebc0e8da37659
+    review_after: "2027-07-13"
+    problem_tags: [decision_policy]
+    input_tags: [pacbio_hifi]

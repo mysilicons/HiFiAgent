@@ -51,7 +51,6 @@ METRIC_SPECS: dict[str, MetricSpec] = {
 
 CORE_AUTO_SELECTION_METRICS = frozenset(
     {
-        "assembly_size_ratio",
         "busco_complete",
         "busco_duplicated",
         "kmer_completeness",

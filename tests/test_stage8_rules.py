@@ -6,6 +6,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from hifi_agent.qc import build_qc_feature_bundle
 from hifi_agent.rules.context import RuleContext, load_rule_context
 from hifi_agent.rules.engine import RuleEngine, load_default_rule_engine, write_rule_decision
 from hifi_agent.rules.models import (
@@ -24,10 +25,11 @@ def context_with(**overrides: object) -> RuleContext:
         "expected_genome_size": 100_000_000,
         "estimated_genome_size": 100_000_000,
         "estimated_coverage": 30.0,
-        "kmer_source": "same_data_advisory",
+        "kmer_source": "independent_high_confidence",
         "kmer_peak_depth": 30.0,
         "genomescope_model_status": "success",
         "kmer_warning_count": 0,
+        "kmer_peak_authorizes_hom_cov": True,
         "hifiasm_hom_cov": 30.0,
         "assembly_size": 100_000_000,
         "assembly_size_ratio": 1.0,
@@ -175,7 +177,7 @@ NEGATIVE_CASES: list[tuple[str, dict[str, object]]] = [
     ("HOM_COV_TRUSTED_KMER_CONFLICT", {"hifiasm_hom_cov": 45.0}),
     (
         "HOM_COV_TRUSTED_KMER_CONFLICT",
-        {"hifiasm_hom_cov": 60.0, "kmer_source": "independent_high_confidence"},
+        {"hifiasm_hom_cov": 60.0, "kmer_peak_authorizes_hom_cov": False},
     ),
     ("COVERAGE_WARNING_KEEP_BASELINE", {"estimated_coverage": 14.999}),
     ("COVERAGE_WARNING_KEEP_BASELINE", {"estimated_coverage": 20.0}),
@@ -401,9 +403,12 @@ def test_rule_context_loads_all_stage_artifacts(tmp_path: Path) -> None:
     (tmp_path / "03_post_qc" / "baseline" / "quast" / "quast_metrics.json").write_text(
         json.dumps({"mode": "reference_based"})
     )
+    build_qc_feature_bundle(tmp_path)
 
     context = load_rule_context(tmp_path)
 
     assert context.estimated_coverage == 30.0
     assert context.hifiasm_hom_cov == 30.0
+    assert context.kmer_peak_authorizes_hom_cov is True
+    assert context.metric_values()["trusted_kmer_peak"] is True
     assert context.tool_failure_count == 0

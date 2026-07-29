@@ -236,6 +236,7 @@ def test_complete_no_llm_execution_logs_every_state_change(tmp_path: Path) -> No
     assert state.state == AgentState.REPORT
     assert state.terminal_outcome == "ACCEPTED"
     assert tools.assembly_calls == ["baseline"]
+    assert tools.post_qc_calls == ["baseline"]
     assert len(trace) == state.transition_sequence
     assert [event.sequence for event in trace] == list(range(1, len(trace) + 1))
     assert trace[-2].state_after == AgentState.ACCEPTED

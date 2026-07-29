@@ -21,12 +21,15 @@ def test_help_lists_initial_commands() -> None:
     assert "validate" in result.output
     assert "plan" in result.output
     assert "run" in result.output
+    assert "assemble" in result.output
+    assert "migrate-v1" in result.output
     assert "evaluate" in result.output
     assert "report" in result.output
     assert "decide" in result.output
     assert "agent" in result.output
     assert "rag-index" in result.output
     assert "explain" in result.output
+    assert "propose" in result.output
     assert "optimize" in result.output
     assert "synthesize-stage11-anomaly" in result.output
 
@@ -150,6 +153,52 @@ def test_agent_command_runs_recoverable_controller(
     assert observed["resume"] is True
 
 
+def test_assemble_command_uses_unified_v2_controller(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / "sample.yaml"
+    config.write_text("sample_id: sample\n")
+    observed: dict[str, object] = {}
+
+    class FakeAssemblyController:
+        def __init__(
+            self,
+            config_path: Path,
+            tools: object,
+            *,
+            confirm_medium_high_risk: bool = False,
+        ) -> None:
+            observed["config"] = config_path
+            observed["tools"] = tools
+            observed["confirm"] = confirm_medium_high_risk
+            self.store = SimpleNamespace(state_path=tmp_path / "run_state.json")
+
+        def run(self, *, resume: bool = False) -> SimpleNamespace:
+            observed["resume"] = resume
+            return SimpleNamespace(
+                terminal_outcome="ACCEPTED_BASELINE",
+                state="REPORT",
+                report_path=tmp_path / "summary.json",
+            )
+
+    fake_tools = object()
+    monkeypatch.setattr(hifi_agent.cli, "AssemblyController", FakeAssemblyController)
+    monkeypatch.setattr(hifi_agent.cli, "ExecutingAssemblyTools", lambda: fake_tools)
+
+    result = runner.invoke(
+        app,
+        ["assemble", str(config), "--resume", "--confirm-medium-high-risk"],
+    )
+
+    assert result.exit_code == ExitCode.OK
+    assert "V2 assembly outcome: ACCEPTED_BASELINE" in result.output
+    assert observed["config"] == config
+    assert observed["tools"] is fake_tools
+    assert observed["resume"] is True
+    assert observed["confirm"] is True
+
+
 def test_rag_index_command_reports_source_and_chunk_counts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -193,3 +242,50 @@ def test_explain_command_supports_llm_disabled_mode(
     assert "Explanation status: DISABLED" in result.output
     assert observed["path"] == run_dir.resolve()
     assert observed["enable_llm"] is False
+
+
+def test_propose_command_passes_stage6_safety_options(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    output_dir = tmp_path / "audit"
+    observed: dict[str, object] = {}
+
+    def fake_propose(path: Path, **kwargs: object) -> SimpleNamespace:
+        observed["path"] = path
+        observed.update(kwargs)
+        return SimpleNamespace(
+            terminal_status="CANDIDATES_APPROVED",
+            decision_mode="hybrid",
+            llm_status="SUCCESS",
+            approved_candidates=[object()],
+            rejected_proposals=[],
+        )
+
+    monkeypatch.setattr(hifi_agent.cli, "propose_run", fake_propose)
+
+    result = runner.invoke(
+        app,
+        [
+            "propose",
+            str(run_dir),
+            "--decision-mode",
+            "hybrid",
+            "--require-llm",
+            "--max-candidates",
+            "2",
+            "--confirm-medium-high-risk",
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    assert result.exit_code == ExitCode.OK
+    assert "Stage 6 status: CANDIDATES_APPROVED" in result.output
+    assert observed["path"] == run_dir.resolve()
+    assert observed["decision_mode"] == "hybrid"
+    assert observed["require_llm"] is True
+    assert observed["max_candidates"] == 2
+    assert observed["confirm_medium_high_risk"] is True

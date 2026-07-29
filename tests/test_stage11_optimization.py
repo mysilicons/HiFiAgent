@@ -390,6 +390,9 @@ def test_real_candidate_executor_builds_whitelisted_same_qc_workflow_command(
         fasta.parent.mkdir(parents=True, exist_ok=True)
         metrics.parent.mkdir(parents=True, exist_ok=True)
         manifest.write_text("{}\n")
+        (manifest.parent / "hifiasm_command.txt").write_text(
+            "hifiasm -o sample.candidate_r01_c01 -t 8 -l 3 -s 0.5 reads.fastq.gz\n"
+        )
         fasta.write_text(">contig\nACGT\n")
         metrics.write_text(_metrics("candidate_r01_c01").model_dump_json())
 
@@ -405,6 +408,15 @@ def test_real_candidate_executor_builds_whitelisted_same_qc_workflow_command(
     assert "CANDIDATE_ONLY" in command
     assert command[command.index("--assembly_run_id") + 1] == "candidate_r01_c01"
     assert command[command.index("--hifiasm_purge_similarity") + 1] == "0.5"
+    assert "--hifiasm_hom_cov" not in command
+    assert "--reference_genome" not in command
+    assert "--busco_lineage" not in command
     assert result.outdir == run_dir.resolve()
     reuse = metadata / "candidate_r01_c01_bin_reuse.tsv"
     assert len(reuse.read_text().splitlines()) == 4
+    contract = json.loads(
+        (
+            run_dir / "02_assembly/candidate_r01_c01/metadata/parameter_contract_check.json"
+        ).read_text()
+    )
+    assert contract["status"] == "PASS"

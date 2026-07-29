@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -18,8 +18,10 @@ from hifi_agent.rag.models import (
     IndexedSource,
     KnowledgeChunk,
     KnowledgeIndex,
+    KnowledgeIndexManifest,
     KnowledgeSource,
     KnowledgeSourceCatalog,
+    ParameterName,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -28,7 +30,7 @@ DEFAULT_INDEX_PATH = PROJECT_ROOT / "knowledge" / "index.json"
 MAX_CHUNK_CHARS = 1800
 CHUNK_OVERLAP_CHARS = 180
 
-PARAMETER_PATTERNS = {
+PARAMETER_PATTERNS: dict[ParameterName, re.Pattern[str]] = {
     "purge_level": re.compile(r"(?:purge level|purging|purge duplication|(?<!\w)-l\d?)", re.I),
     "purge_similarity": re.compile(r"(?:similarity threshold|haplotig|(?<!\w)-s\d?)", re.I),
     "hom_cov": re.compile(r"(?:--hom-cov|homozygous (?:read )?coverage)", re.I),
@@ -43,6 +45,17 @@ PROBLEM_PATTERNS = {
     "kmer_quality": re.compile(r"Merqury|quality value|\bQV\b|k-mer", re.I),
     "contiguity": re.compile(r"\bN50\b|contig|fragment", re.I),
     "ploidy": re.compile(r"ploid|haplotype|diploid|polyploid", re.I),
+}
+PROMPT_INJECTION_PATTERNS = {
+    "PROMPT_INJECTION_IGNORE_INSTRUCTIONS": re.compile(
+        r"ignore (?:all |the )?(?:previous|system|developer) (?:instructions?|prompts?)", re.I
+    ),
+    "PROMPT_INJECTION_ROLE_OVERRIDE": re.compile(
+        r"(?:you are now|act as|system prompt|override (?:the )?rules?)", re.I
+    ),
+    "PROMPT_INJECTION_EXECUTION_REQUEST": re.compile(
+        r"(?:execute|run) (?:this |the )?(?:shell|command|script)", re.I
+    ),
 }
 
 
@@ -126,11 +139,15 @@ def build_knowledge_index(
     output_path: Path = DEFAULT_INDEX_PATH,
     project_root: Path = PROJECT_ROOT,
     built_at: datetime | None = None,
+    as_of: date | None = None,
+    manifest_path: Path | None = None,
 ) -> KnowledgeIndex:
     """Parse every allowlisted source, create stable chunks, and write the local index."""
     catalog = load_source_catalog(catalog_path)
     indexed_sources: list[IndexedSource] = []
     chunks: list[KnowledgeChunk] = []
+    warnings: list[str] = []
+    observed_date = as_of or date.today()
     for source in catalog.sources:
         path = (
             source.file_path if source.file_path.is_absolute() else project_root / source.file_path
@@ -139,8 +156,22 @@ def build_knowledge_index(
             raise RuleConfigurationError(
                 f"Knowledge source `{source.source_id}` is missing: {path}"
             )
+        observed_sha256 = _sha256(path)
+        if observed_sha256 != source.expected_sha256:
+            raise RuleConfigurationError(
+                f"Knowledge source `{source.source_id}` SHA-256 mismatch: "
+                f"expected {source.expected_sha256}, observed {observed_sha256}"
+            )
+        stale = observed_date > source.review_after
+        if stale:
+            warnings.append(f"STALE_SOURCE:{source.source_id}:{source.review_after.isoformat()}")
         sections = _extract_sections(path)
         source_chunks = _chunk_sections(source, sections)
+        if stale:
+            source_chunks = [
+                chunk.model_copy(update={"authorized_parameter_tags": []})
+                for chunk in source_chunks
+            ]
         if not source_chunks:
             raise RuleConfigurationError(
                 f"Knowledge source `{source.source_id}` produced no usable chunks"
@@ -149,19 +180,56 @@ def build_knowledge_index(
         indexed_sources.append(
             IndexedSource(
                 source=source,
-                sha256=_sha256(path),
+                sha256=observed_sha256,
                 byte_size=path.stat().st_size,
                 chunk_count=len(source_chunks),
+                stale=stale,
             )
         )
+    parameter_evidence = {
+        parameter: sorted(
+            {
+                chunk.source_id
+                for chunk in chunks
+                if parameter in chunk.authorized_parameter_tags and not chunk.quarantined
+            }
+        )
+        for parameter in catalog.required_parameters
+    }
+    missing_index_evidence = sorted(
+        parameter for parameter, source_ids in parameter_evidence.items() if not source_ids
+    )
+    if missing_index_evidence:
+        raise RuleConfigurationError(
+            f"Indexed content lacks official parameter evidence: {missing_index_evidence}"
+        )
+    resolved_built_at = built_at or datetime.now(UTC)
     index = KnowledgeIndex(
         catalog_version=catalog.catalog_version,
-        built_at=built_at or datetime.now(UTC),
+        catalog_sha256=_sha256(catalog_path),
+        target_hifiasm_version=catalog.target_hifiasm_version,
+        built_at=resolved_built_at,
         sources=indexed_sources,
         chunks=chunks,
+        warnings=sorted(warnings),
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(index.model_dump_json(indent=2) + "\n")
+    manifest = KnowledgeIndexManifest(
+        catalog_version=catalog.catalog_version,
+        catalog_sha256=index.catalog_sha256,
+        target_hifiasm_version=catalog.target_hifiasm_version,
+        built_at=resolved_built_at,
+        source_ids=[item.source.source_id for item in indexed_sources],
+        source_sha256={item.source.source_id: item.sha256 for item in indexed_sources},
+        parameter_evidence=parameter_evidence,
+        chunk_count=len(chunks),
+        quarantined_chunk_count=sum(chunk.quarantined for chunk in chunks),
+        warnings=index.warnings,
+    )
+    resolved_manifest_path = manifest_path or output_path.with_name("index_manifest.json")
+    resolved_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_manifest_path.write_text(manifest.model_dump_json(indent=2) + "\n")
     return index
 
 
@@ -172,9 +240,30 @@ def load_knowledge_index(path: Path = DEFAULT_INDEX_PATH) -> KnowledgeIndex:
             f"Knowledge index does not exist: {path}; run `hifi-agent rag-index`"
         )
     try:
-        return KnowledgeIndex.model_validate_json(path.read_text())
+        index = KnowledgeIndex.model_validate_json(path.read_text())
     except (OSError, ValidationError) as exc:
         raise RuleConfigurationError(f"Knowledge index is invalid: {path}: {exc}") from exc
+    if path.resolve() == DEFAULT_INDEX_PATH.resolve():
+        catalog = load_source_catalog()
+        if index.catalog_sha256 != _sha256(DEFAULT_SOURCE_CATALOG):
+            raise RuleConfigurationError("Knowledge index catalog SHA-256 is stale")
+        catalog_ids = {source.source_id for source in catalog.sources}
+        index_ids = {item.source.source_id for item in index.sources}
+        if index_ids != catalog_ids:
+            raise RuleConfigurationError("Knowledge index source IDs differ from the V2 catalog")
+        catalog_by_id = {source.source_id: source for source in catalog.sources}
+        for indexed in index.sources:
+            if indexed.source != catalog_by_id[indexed.source.source_id]:
+                raise RuleConfigurationError(
+                    f"Knowledge index source metadata differs from catalog: "
+                    f"{indexed.source.source_id}"
+                )
+            if indexed.sha256 != indexed.source.expected_sha256:
+                raise RuleConfigurationError(
+                    f"Knowledge index source checksum differs from catalog: "
+                    f"{indexed.source.source_id}"
+                )
+    return index
 
 
 def _extract_sections(path: Path) -> list[Section]:
@@ -226,6 +315,14 @@ def _chunk_sections(source: KnowledgeSource, sections: list[Section]) -> list[Kn
             identity = f"{source.source_id}\n{section.title}\n{ordinal}\n{text}"
             digest = hashlib.sha256(identity.encode()).hexdigest()[:12]
             combined = f"{section.title} {text}"
+            detected_parameters = sorted(
+                tag for tag, pattern in PARAMETER_PATTERNS.items() if pattern.search(combined)
+            )
+            security_warnings = sorted(
+                warning
+                for warning, pattern in PROMPT_INJECTION_PATTERNS.items()
+                if pattern.search(combined)
+            )
             chunks.append(
                 KnowledgeChunk(
                     chunk_id=f"{source.source_id}_{digest}",
@@ -233,14 +330,23 @@ def _chunk_sections(source: KnowledgeSource, sections: list[Section]) -> list[Kn
                     section=section.title[:300],
                     text=text,
                     ordinal=ordinal,
-                    parameter_tags=sorted(
-                        tag
-                        for tag, pattern in PARAMETER_PATTERNS.items()
-                        if pattern.search(combined)
-                    ),
+                    parameter_tags=detected_parameters,
                     problem_tags=sorted(
-                        tag for tag, pattern in PROBLEM_PATTERNS.items() if pattern.search(combined)
+                        {
+                            *source.problem_tags,
+                            *(
+                                tag
+                                for tag, pattern in PROBLEM_PATTERNS.items()
+                                if pattern.search(combined)
+                            ),
+                        }
                     ),
+                    input_tags=source.input_tags,
+                    authorized_parameter_tags=sorted(
+                        set(detected_parameters).intersection(source.parameter_tags)
+                    ),
+                    quarantined=bool(security_warnings),
+                    security_warnings=security_warnings,
                 )
             )
     return chunks

@@ -1,7 +1,7 @@
 """Command line interface for HiFi Agent."""
 
 from pathlib import Path
-from typing import Annotated, NoReturn
+from typing import Annotated, Literal, NoReturn
 
 import typer
 from pydantic import ValidationError
@@ -12,6 +12,7 @@ from hifi_agent.config import validate_config_file
 from hifi_agent.constants import APP_NAME, __version__
 from hifi_agent.exceptions import (
     HiFiAgentError,
+    InputValidationError,
     NotImplementedCommandError,
     RuleEvaluationError,
 )
@@ -26,7 +27,12 @@ from hifi_agent.optimization import (
     run_stage11_optimization,
     synthesize_candida_stage11_scenario,
 )
-from hifi_agent.rag import DEFAULT_INDEX_PATH, build_knowledge_index, explain_run
+from hifi_agent.orchestration import (
+    AssemblyController,
+    ExecutingAssemblyTools,
+    inspect_v1_migration,
+)
+from hifi_agent.rag import DEFAULT_INDEX_PATH, build_knowledge_index, explain_run, propose_run
 from hifi_agent.reporting import (
     DEFAULT_SYNTHETIC_SCENARIO,
     render_final_report,
@@ -103,7 +109,7 @@ def run(
         typer.Option("--resume", help="Resume a previous Nextflow run when cached tasks exist."),
     ] = False,
 ) -> None:
-    """Run the configured HiFi Agent workflow."""
+    """Advanced V1 step: run the baseline workflow without V2 orchestration."""
     try:
         validation = validate_config_file(config)
         result = run_phase3_workflow(validation.config, resume=resume)
@@ -114,6 +120,60 @@ def run(
     console.print("[green]Workflow completed.[/green]")
     console.print(f"Output directory: {result.outdir}")
     console.print(f"Reads manifest: {result.reads_manifest}")
+
+
+@app.command()
+def assemble(
+    config: Annotated[Path, typer.Argument(help="V2 sample configuration YAML file.")],
+    resume: Annotated[
+        bool,
+        typer.Option("--resume", help="Resume the persisted V2 state and Nextflow cache."),
+    ] = False,
+    confirm_medium_high_risk: Annotated[
+        bool,
+        typer.Option(
+            "--confirm-medium-high-risk",
+            help="Authorize execution of a rule-approved medium-high/high-risk candidate.",
+        ),
+    ] = False,
+) -> None:
+    """Run the unified V2 baseline and first bounded candidate orchestration path."""
+    try:
+        controller = AssemblyController(
+            config,
+            ExecutingAssemblyTools(),
+            confirm_medium_high_risk=confirm_medium_high_risk,
+        )
+        state = controller.run(resume=resume)
+    except HiFiAgentError as exc:
+        abort_with_error(exc)
+    console = get_console()
+    console.print(f"[green]V2 assembly outcome: {state.terminal_outcome}[/green]")
+    console.print(f"State: {state.state}")
+    console.print(f"State file: {controller.store.state_path}")
+    console.print(f"Report: {state.report_path}")
+
+
+@app.command("migrate-v1")
+def migrate_v1(
+    run_dir: Annotated[Path, typer.Argument(help="Existing V1 output directory.")],
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run/--execute", help="Inspect only; V2 currently forbids writes."),
+    ] = True,
+) -> None:
+    """Inspect a V1 run without modifying it; execution is intentionally unavailable."""
+    if not dry_run:
+        abort_with_error(
+            InputValidationError("V1 migration execution is not implemented; rerun with --dry-run")
+        )
+    try:
+        inspection = inspect_v1_migration(run_dir)
+    except HiFiAgentError as exc:
+        abort_with_error(exc)
+    console = get_console()
+    console.print("[green]V1 migration dry-run completed; no files were written.[/green]")
+    console.print(inspection.model_dump_json(indent=2))
 
 
 @app.command()
@@ -165,7 +225,7 @@ def run_agent(
         typer.Option("--resume", help="Resume from 05_agent/agent_state.json."),
     ] = False,
 ) -> None:
-    """Run or resume the explicit Stage 9 controller without an LLM."""
+    """Advanced V1 step: replay the legacy controller over existing artifacts."""
     resolved_run_dir = run_dir.resolve()
     config_path = resolved_run_dir / "00_metadata" / "resolved_config.yaml"
     try:
@@ -191,7 +251,7 @@ def rag_index(
         typer.Option("--output", help="Local full-text index JSON path."),
     ] = DEFAULT_INDEX_PATH,
 ) -> None:
-    """Build the local provenance-preserving Stage 10 knowledge index."""
+    """Build the governed V2 provenance-preserving local knowledge index."""
     try:
         index = build_knowledge_index(output_path=output.resolve())
     except HiFiAgentError as exc:
@@ -201,6 +261,7 @@ def rag_index(
     console.print(f"Sources: {len(index.sources)}")
     console.print(f"Chunks: {len(index.chunks)}")
     console.print(f"Index: {output.resolve()}")
+    console.print(f"Manifest: {output.resolve().with_name('index_manifest.json')}")
 
 
 @app.command("explain")
@@ -232,6 +293,67 @@ def explain_decision(
     console.print(f"Retrieved sources: {len({hit.source_id for hit in bundle.retrieval_evidence})}")
     console.print(f"Explanation: {output_dir / 'explanation.json'}")
     console.print(f"RAG comparison: {output_dir / 'rag_comparison.json'}")
+
+
+@app.command("propose")
+def propose_candidates(
+    run_dir: Annotated[Path, typer.Argument(help="Existing evaluated V2 run directory.")],
+    index: Annotated[
+        Path,
+        typer.Option("--index", help="Governed local RAG index JSON path."),
+    ] = DEFAULT_INDEX_PATH,
+    decision_mode: Annotated[
+        Literal["rules_only", "hybrid", "llm_disabled"],
+        typer.Option("--decision-mode", help="Audited Stage 6 decision mode."),
+    ] = "rules_only",
+    require_llm: Annotated[
+        bool,
+        typer.Option(
+            "--require-llm",
+            help="Stop instead of deterministic fallback on LLM failure.",
+        ),
+    ] = False,
+    max_candidates: Annotated[
+        int,
+        typer.Option("--max-candidates", min=1, max=2, help="Hard candidate limit."),
+    ] = 1,
+    confirm_medium_high_risk: Annotated[
+        bool,
+        typer.Option(
+            "--confirm-medium-high-risk",
+            help="Authorize deterministic approval of medium-high/high-risk proposals.",
+        ),
+    ] = False,
+    output_dir: Annotated[
+        Path | None,
+        typer.Option("--output-dir", help="Optional Stage 6 audit output directory."),
+    ] = None,
+) -> None:
+    """Generate and safety-arbitrate candidates without executing an assembly."""
+    try:
+        bundle = propose_run(
+            run_dir.resolve(),
+            index_path=index.resolve(),
+            output_dir=output_dir,
+            decision_mode=decision_mode,
+            require_llm=require_llm,
+            max_candidates=max_candidates,
+            confirm_medium_high_risk=confirm_medium_high_risk,
+        )
+    except HiFiAgentError as exc:
+        abort_with_error(exc)
+    destination = (
+        output_dir.resolve()
+        if output_dir is not None
+        else run_dir.resolve() / "04_decisions/baseline/proposals"
+    )
+    console = get_console()
+    console.print(f"[green]Stage 6 status: {bundle.terminal_status}[/green]")
+    console.print(f"Decision mode: {bundle.decision_mode}")
+    console.print(f"LLM status: {bundle.llm_status}")
+    console.print(f"Approved candidates: {len(bundle.approved_candidates)}")
+    console.print(f"Rejected proposals: {len(bundle.rejected_proposals)}")
+    console.print(f"Audit: {destination / 'proposal_decision.json'}")
 
 
 @app.command("synthesize-stage11-anomaly")
@@ -279,7 +401,7 @@ def optimize(
         ),
     ] = False,
 ) -> None:
-    """Run one bounded Stage 11 candidate planning and comparison round."""
+    """Advanced V1 step: run one bounded candidate planning/comparison round."""
     resolved_run = run_dir.resolve()
 
     def _execute_candidate(candidate: AssemblyConfig) -> AssemblyMetrics:

@@ -56,6 +56,7 @@ def test_local_profile_enables_execution_artifacts() -> None:
 
     assert "workDir" in local_config
     assert "name = 'local'" in local_config
+    assert "publish_overwrite = false" in local_config
 
 
 def test_large_local_host_resource_policy() -> None:
@@ -69,3 +70,10 @@ def test_large_local_host_resource_policy() -> None:
     assert "withName: MAPPING_POST_QC" in base_config
     assert "withName: QUAST" in base_config
     assert "withName: BUSCO_POST_QC" in base_config
+
+
+def test_scientific_artifacts_are_not_published_with_overwrite_enabled() -> None:
+    main_nf = (WORKFLOW_DIR / "main.nf").read_text()
+
+    assert "overwrite: true" not in main_nf
+    assert main_nf.count("overwrite: params.publish_overwrite") == 14
