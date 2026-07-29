@@ -62,6 +62,8 @@ source = [
   "hifi_agent.parsers",
   "hifi_agent.qc",
   "hifi_agent.rag",
+  "hifi_agent.reporting.v2",
+  "hifi_agent.reporting.v2_models",
   "hifi_agent.rules",
 ]
 

@@ -116,3 +116,20 @@ when their milestone begins.
 | V2-905 Prove real round 2 and round 3 controller paths | V2-M4 | V2-902..904 | complete | canonical `candidate_r02_c01`/`candidate_r03_c01` tests |
 | V2-906 Run genuine Candida Stage 9 acceptance | V2-M4 | V2-805, V2-901..905 | complete | retained Stage 7 attempt consumed to `STOP_PLATEAU` |
 | V2-907 Complete Stage 8/9 quality gates | V2-M4 | V2-801..906 | complete | `v2_stage8_stage9_acceptance.md` |
+
+## Stage 10 and 11 issues
+
+| Issue | Milestone | Dependency | Status | Acceptance evidence |
+|---|---|---|---|---|
+| V2-1001 Add cross-stage final report schema | V2-M5 | V2-907 | complete | strict STOP semantics and evidence-class tests |
+| V2-1002 Collect every baseline/candidate attempt | V2-M5 | V2-1001 | complete | failed, completed, and rejected history tests |
+| V2-1003 Reconcile parameters with actual argv | V2-M5 | V2-1001 | complete | four-stage lineage and argv equality tests |
+| V2-1004 Add LLM/RAG provenance and path redaction | V2-M5 | V2-1001 | complete | provider/hash/classification/redaction tests |
+| V2-1005 Support failed and V1-compatible reports | V2-M5 | V2-1001 | complete | partial and compatibility report tests |
+| V2-1006 Run genuine Candida report acceptance | V2-M5 | V2-1002..1005 | complete | retained Stage 6–9 evidence report |
+| V2-1101 Add production safety benchmark | V2-M5 | V2-1006 | complete | five comparator safety scenarios |
+| V2-1102 Add A–D ablation matrix | V2-M5 | V2-1101 | complete | common safety, quality, cost, and review metrics |
+| V2-1103 Account failed and completed execution cost | V2-M5 | V2-1002 | complete | Nextflow trace, receipt walltime, inventory bytes |
+| V2-1104 Register a second genuine sample | V2-M5 | V2-1101 | complete | SRR33554835 full FASTQ audit |
+| V2-1105 Revalidate repaired Candida candidate | V2-M5 | V2-707 | complete | attempt 001 failure plus attempt 002 PASS contract |
+| V2-1106 Complete Stage 10/11 quality gates | V2-M5 | V2-1001..1105 | complete | `v2_stage10_stage11_acceptance.md` |

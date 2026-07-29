@@ -1012,15 +1012,15 @@ conda run -n hifiAgent mypy
 
 ### 任务
 
-- [ ] 汇总所有 round 和 attempt；
-- [ ] 区分事实、推导、规则结论和 LLM 文本；
-- [ ] 显示 LLM provider/model/index hash/prompt hash；
-- [ ] 显示被拒绝提议及安全原因；
-- [ ] 显示参数契约检查；
-- [ ] 输出 `all_runs.tsv`、`all_parameters.tsv`；
-- [ ] 默认脱敏绝对路径；
-- [ ] 失败运行也必须生成报告；
-- [ ] 对 V1 历史提供兼容报告。
+- [x] 汇总所有 round 和 attempt；
+- [x] 区分事实、推导、规则结论和 LLM 文本；
+- [x] 显示 LLM provider/model/index hash/prompt hash；
+- [x] 显示被拒绝提议及安全原因；
+- [x] 显示参数契约检查；
+- [x] 输出 `all_runs.tsv`、`all_parameters.tsv`；
+- [x] 默认脱敏绝对路径；
+- [x] 失败运行也必须生成报告；
+- [x] 对 V1 历史提供兼容报告。
 
 ### 验收
 
@@ -1040,16 +1040,16 @@ conda run -n hifiAgent mypy
 
 ### 任务
 
-- [ ] 单元测试覆盖 Schema、command contract、arbiter、comparator、stopping；
-- [ ] 状态机 property/transition 测试；
-- [ ] Nextflow compile 和 resume 测试；
-- [ ] mock LLM 集成测试；
-- [ ] prompt injection 和越权测试；
-- [ ] 三轮闭环 fixture；
-- [ ] 真实 Candida 修复后重新运行单变量 candidate；
-- [ ] 至少增加一个不同基因组大小/杂合度真实样本；
-- [ ] 记录 CPU、walltime、磁盘和 LLM 调用成本；
-- [ ] 运行消融实验。
+- [x] 单元测试覆盖 Schema、command contract、arbiter、comparator、stopping；
+- [x] 状态机 property/transition 测试；
+- [x] Nextflow compile 和 resume 测试；
+- [x] mock LLM 集成测试；
+- [x] prompt injection 和越权测试；
+- [x] 三轮闭环 fixture；
+- [x] 真实 Candida 修复后重新运行单变量 candidate；
+- [x] 至少增加一个不同基因组大小/杂合度真实样本；
+- [x] 记录 CPU、walltime、磁盘和 LLM 调用成本；
+- [x] 运行消融实验。
 
 ### 消融组
 

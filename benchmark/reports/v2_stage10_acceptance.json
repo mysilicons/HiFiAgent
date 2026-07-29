@@ -1,0 +1,40 @@
+{
+  "schema_version": "2.0",
+  "stage": 10,
+  "date": "2026-07-29",
+  "result": "PASS",
+  "sample_id": "Candida_albicans",
+  "terminal_outcome": "STOP_PLATEAU",
+  "outcome_class": "STOPPED",
+  "optimization_succeeded": false,
+  "optimization_selected_run_id": null,
+  "final_recommended_run_id": "baseline",
+  "history": {
+    "baseline_rows": 1,
+    "failed_attempts": 1,
+    "completed_attempts": 1,
+    "completed_contract": "PASS",
+    "completed_argv_lineage_matches": true
+  },
+  "deepseek": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "response_id": "e7377a3b-312e-417a-9f2a-472f77feb665",
+    "index_sha256": "cdd442ce8fa0321e66cea9aa3bc42b79786c16b6ba9a2eddb22830f152c03bbe",
+    "prompt_sha256": "a99856e853ec287ba19348a874cc2e56d65678b36dbe5bcb1597a10cf4a4bf16",
+    "proposal_output_sha256": "e45ace004493531c632d8b44720be1cfe73da5247e5cc0892102728e7be5e085",
+    "prompt_tokens": 5855,
+    "completion_tokens": 2115,
+    "raw_proposal_count": 0
+  },
+  "acceptance": {
+    "thirteen_sections": "PASS",
+    "all_runs_tsv": "PASS",
+    "all_parameters_tsv": "PASS",
+    "evidence_class_separation": "PASS",
+    "default_path_redaction": "PASS",
+    "failed_report": "PASS",
+    "v1_compatibility": "PASS",
+    "stop_not_success": "PASS"
+  }
+}

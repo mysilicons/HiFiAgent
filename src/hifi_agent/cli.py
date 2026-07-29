@@ -7,7 +7,7 @@ import typer
 from pydantic import ValidationError
 
 from hifi_agent.agent import AgentController, AssemblyConfig, ExistingRunAgentTools
-from hifi_agent.benchmarking import run_benchmark
+from hifi_agent.benchmarking import run_benchmark, run_v2_benchmark
 from hifi_agent.config import validate_config_file
 from hifi_agent.constants import APP_NAME, __version__
 from hifi_agent.exceptions import (
@@ -48,6 +48,7 @@ from hifi_agent.rag import (
 from hifi_agent.reporting import (
     DEFAULT_SYNTHETIC_SCENARIO,
     render_final_report,
+    render_v2_report,
     synthesize_candida_quality_regression,
 )
 from hifi_agent.rules import load_default_rule_engine, load_rule_context, write_rule_decision
@@ -628,6 +629,64 @@ def report(
     console.print(f"Comparison: {outputs.comparison_tsv}")
 
 
+@app.command("report-v2")
+def report_v2(
+    run_dir: Annotated[Path, typer.Argument(help="Validated baseline run directory.")],
+    stage7_root: Annotated[
+        Path,
+        typer.Option("--stage7-root", help="Immutable Stage 7 execution history root."),
+    ],
+    comparison: Annotated[
+        Path,
+        typer.Option("--comparison", help="Stage 8 round comparison JSON."),
+    ],
+    loop_state: Annotated[
+        Path,
+        typer.Option("--loop-state", help="Stage 9 optimization loop state JSON."),
+    ],
+    proposal: Annotated[
+        Path,
+        typer.Option("--proposal", help="Stage 6 proposal decision JSON."),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Stage 10 V2 report directory."),
+    ],
+    llm_receipt: Annotated[
+        Path | None,
+        typer.Option("--llm-receipt", help="Optional genuine provider acceptance receipt."),
+    ] = None,
+    index: Annotated[
+        Path | None,
+        typer.Option("--index", help="Knowledge index whose hash is reported."),
+    ] = None,
+    show_absolute_paths: Annotated[
+        bool,
+        typer.Option("--show-absolute-paths", help="Disable default absolute-path redaction."),
+    ] = False,
+) -> None:
+    """Render the cross-stage V2 report and complete history tables."""
+    try:
+        outputs = render_v2_report(
+            run_dir,
+            output_dir=output_dir,
+            stage7_root=stage7_root,
+            comparison_path=comparison,
+            loop_state_path=loop_state,
+            proposal_path=proposal,
+            llm_receipt_path=llm_receipt,
+            index_path=index,
+            redact_paths=not show_absolute_paths,
+        )
+    except (HiFiAgentError, ValidationError, OSError, ValueError) as exc:
+        abort_with_error(InputValidationError(f"Stage 10 V2 report failed: {exc}"))
+    console = get_console()
+    console.print("[green]Stage 10 V2 report rendered.[/green]")
+    console.print(f"Markdown: {outputs.markdown}")
+    console.print(f"All runs: {outputs.all_runs_tsv}")
+    console.print(f"All parameters: {outputs.all_parameters_tsv}")
+
+
 @app.command()
 def benchmark(
     output_dir: Annotated[
@@ -662,6 +721,48 @@ def benchmark(
     console.print(f"Scenarios: {result.metrics.scenario_count}")
     console.print(f"Report: {output_dir.resolve() / 'v1_benchmark.md'}")
     if not result.acceptance_passed:
+        raise typer.Exit(code=1)
+
+
+@app.command("benchmark-v2")
+def benchmark_v2(
+    stage10_report: Annotated[
+        Path,
+        typer.Argument(help="Stage 10 v2_final_report.json."),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Stage 11 V2 benchmark artifact directory."),
+    ],
+    sample_manifest: Annotated[
+        Path,
+        typer.Option("--sample-manifest", help="Versioned genuine sample manifest."),
+    ] = Path("configs/v2_real_benchmark_samples.yaml"),
+    verify_full_checksums: Annotated[
+        bool,
+        typer.Option(
+            "--verify-full-checksums",
+            help="Read and SHA-256 every genuine FASTQ for real-data acceptance.",
+        ),
+    ] = False,
+) -> None:
+    """Run the Stage 11 safety benchmark and A-D ablation."""
+    try:
+        result = run_v2_benchmark(
+            output_dir,
+            stage10_report_path=stage10_report,
+            sample_manifest_path=sample_manifest,
+            verify_full_checksums=verify_full_checksums,
+        )
+    except (HiFiAgentError, ValidationError, OSError, ValueError) as exc:
+        abort_with_error(RuleEvaluationError(f"Stage 11 V2 benchmark failed: {exc}"))
+    color = "green" if result.result == "PASS" else "red"
+    console = get_console()
+    console.print(f"[{color}]Stage 11 V2 benchmark: {result.result}[/{color}]")
+    console.print(f"Real datasets: {len(result.dataset_audits)}")
+    console.print(f"Safety scenarios: {len(result.safety_scenarios)}")
+    console.print(f"Report: {output_dir.resolve() / 'v2_benchmark.md'}")
+    if result.result != "PASS":
         raise typer.Exit(code=1)
 
 

@@ -36,6 +36,8 @@ def test_help_lists_initial_commands() -> None:
     assert "propose" in result.output
     assert "execute-candidate" in result.output
     assert "compare-stage7" in result.output
+    assert "report-v2" in result.output
+    assert "benchmark-v2" in result.output
     assert "optimize" in result.output
     assert "synthesize-stage11-anomaly" in result.output
 
