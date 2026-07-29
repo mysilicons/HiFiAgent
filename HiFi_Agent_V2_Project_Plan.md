@@ -930,16 +930,16 @@ conda run -n hifiAgent mypy
 
 ### 任务
 
-- [ ] comparator 支持任意 incumbent run ID；
-- [ ] 指标方向和 material threshold 移入版本化配置；
-- [ ] 区分 hard regression、acceptance failure、tradeoff、unavailable；
-- [ ] reference-free 时忽略 misassembly 自动结论；
-- [ ] genome size 不可信时降低 size ratio 权重；
-- [ ] 实现 incumbent/candidate 和 candidate/candidate Pareto 比较；
-- [ ] 实现唯一胜者、多个非支配候选和无改善分支；
-- [ ] 实现 `STOP_PLATEAU`；
-- [ ] 保存 round comparison、parameter diff 和 selection tradeoff；
-- [ ] 禁止 invalid parameter contract 的 attempt 进入比较。
+- [x] comparator 支持任意 incumbent run ID；
+- [x] 指标方向和 material threshold 移入版本化配置；
+- [x] 区分 hard regression、acceptance failure、tradeoff、unavailable；
+- [x] reference-free 时忽略 misassembly 自动结论；
+- [x] genome size 不可信时降低 size ratio 权重；
+- [x] 实现 incumbent/candidate 和 candidate/candidate Pareto 比较；
+- [x] 实现唯一胜者、多个非支配候选和无改善分支；
+- [x] 实现 `STOP_PLATEAU`；
+- [x] 保存 round comparison、parameter diff 和 selection tradeoff；
+- [x] 禁止 invalid parameter contract 的 attempt 进入比较。
 
 ### 验收
 
@@ -959,17 +959,17 @@ conda run -n hifiAgent mypy
 
 ### 任务
 
-- [ ] 实现 `OptimizationLoop`；
-- [ ] round 1～3 从持久化 state 递增；
-- [ ] 每轮使用当前 incumbent 指标构建新决策上下文；
-- [ ] 历轮参数指纹全局去重；
-- [ ] 每轮更新剩余预算；
-- [ ] 接收 comparator 的 incumbent 更新；
-- [ ] 消费 `RETRY` 并启动下一轮；
-- [ ] 消费 plateau/conflict/failure/budget 并停止；
-- [ ] 第 3 轮结束强制 `STOP_MAX_ROUNDS` 或接受当前 incumbent；
-- [ ] 支持在任意 round/candidate/post-QC 节点 resume；
-- [ ] 保证重新运行不会回到 round 1。
+- [x] 实现 `OptimizationLoop`；
+- [x] round 1～3 从持久化 state 递增；
+- [x] 每轮使用当前 incumbent 指标构建新决策上下文；
+- [x] 历轮参数指纹全局去重；
+- [x] 每轮更新剩余预算；
+- [x] 接收 comparator 的 incumbent 更新；
+- [x] 消费 `RETRY` 并启动下一轮；
+- [x] 消费 plateau/conflict/failure/budget 并停止；
+- [x] 第 3 轮结束强制 `STOP_MAX_ROUNDS` 或接受当前 incumbent；
+- [x] 支持在任意 round/candidate/post-QC 节点 resume；
+- [x] 保证重新运行不会回到 round 1。
 
 ### 三轮验收场景
 

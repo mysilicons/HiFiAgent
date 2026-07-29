@@ -10,6 +10,7 @@ import hifi_agent.cli
 from hifi_agent.cli import app
 from hifi_agent.constants import ExitCode
 from hifi_agent.executors.nextflow import NextflowRunResult
+from hifi_agent.optimization import RoundComparisonContext
 from hifi_agent.rag.models import ApprovedCandidate
 from hifi_agent.rules.context import RuleContext
 from hifi_agent.rules.models import CandidateParameters, RuleDecision
@@ -34,6 +35,7 @@ def test_help_lists_initial_commands() -> None:
     assert "explain" in result.output
     assert "propose" in result.output
     assert "execute-candidate" in result.output
+    assert "compare-stage7" in result.output
     assert "optimize" in result.output
     assert "synthesize-stage11-anomaly" in result.output
 
@@ -391,3 +393,58 @@ def test_execute_candidate_rejects_non_approved_json(tmp_path: Path) -> None:
 
     assert result.exit_code == ExitCode.INPUT_VALIDATION_FAILED
     assert "ApprovedCandidate JSON is invalid" in result.output
+
+
+def test_compare_stage7_command_passes_scientific_applicability_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline = object()
+    candidate = object()
+    observed: dict[str, object] = {}
+    monkeypatch.setattr(
+        hifi_agent.cli,
+        "load_baseline_comparable",
+        lambda path: baseline,
+    )
+    monkeypatch.setattr(
+        hifi_agent.cli,
+        "load_stage7_comparable",
+        lambda path: candidate,
+    )
+
+    class FakeComparator:
+        def compare_round(self, **kwargs: object) -> SimpleNamespace:
+            observed.update(kwargs)
+            return SimpleNamespace(
+                outcome="STOP_PLATEAU",
+                incumbent_before="baseline",
+                incumbent_after="baseline",
+            )
+
+    monkeypatch.setattr(hifi_agent.cli, "RoundComparator", FakeComparator)
+    output = tmp_path / "round"
+    result = runner.invoke(
+        app,
+        [
+            "compare-stage7",
+            str(tmp_path / "baseline"),
+            str(tmp_path / "attempt"),
+            "--output-dir",
+            str(output),
+            "--round",
+            "2",
+            "--reference-free",
+            "--genome-size-trusted",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.OK
+    assert "Stage 8 outcome: STOP_PLATEAU" in result.output
+    assert observed["round_index"] == 2
+    assert observed["incumbent"] is baseline
+    assert observed["candidates"] == [candidate]
+    context = observed["context"]
+    assert isinstance(context, RoundComparisonContext)
+    assert context.reference_available is False
+    assert context.genome_size_trusted is True

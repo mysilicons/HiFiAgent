@@ -99,3 +99,20 @@ when their milestone begins.
 | V2-706 Retain complete and partial artifacts | V2-M4 | V2-703 | complete | real 9,722-entry inventory |
 | V2-707 Run genuine DeepSeek-approved Candida candidate | V2-M4 | V2-608, V2-701..706 | complete | gated real-data acceptance |
 | V2-708 Complete Stage 7 quality gates | V2-M4 | V2-701..707 | complete | `v2_stage7_acceptance.md` |
+
+## Stage 8 and 9 issues
+
+| Issue | Milestone | Dependency | Status | Acceptance evidence |
+|---|---|---|---|---|
+| V2-801 Add versioned comparison policy | V2-M4 | V2-708 | complete | policy schema, boundary, and applicability tests |
+| V2-802 Compare arbitrary incumbents and candidates | V2-M4 | V2-801 | complete | incumbent and Pareto comparator tests |
+| V2-803 Classify unsafe, conflicting, and incomplete evidence | V2-M4 | V2-801..802 | complete | hard-regression, acceptance, tradeoff, and unavailable tests |
+| V2-804 Persist round selection evidence | V2-M4 | V2-802 | complete | JSON/TSV/parameter/tradeoff artifacts |
+| V2-805 Run genuine Candida Stage 8 acceptance | V2-M4 | V2-803..804 | complete | checksum-bound baseline/candidate plateau comparison |
+| V2-901 Add bounded persistent optimization loop | V2-M4 | V2-804 | complete | atomic state and contiguous event trace tests |
+| V2-902 Consume decisions and comparison outcomes | V2-M4 | V2-901 | complete | all eight prescribed loop scenarios |
+| V2-903 Enforce fingerprints, budgets, and execution contract | V2-M4 | V2-901 | complete | duplicate, budget, run-ID, and parameter-lineage tests |
+| V2-904 Resume at candidate and post-QC boundaries | V2-M4 | V2-901 | complete | round-2 and compare-phase interruption tests |
+| V2-905 Prove real round 2 and round 3 controller paths | V2-M4 | V2-902..904 | complete | canonical `candidate_r02_c01`/`candidate_r03_c01` tests |
+| V2-906 Run genuine Candida Stage 9 acceptance | V2-M4 | V2-805, V2-901..905 | complete | retained Stage 7 attempt consumed to `STOP_PLATEAU` |
+| V2-907 Complete Stage 8/9 quality gates | V2-M4 | V2-801..906 | complete | `v2_stage8_stage9_acceptance.md` |

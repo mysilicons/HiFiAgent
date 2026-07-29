@@ -26,6 +26,10 @@ from hifi_agent.executors.nextflow import (
 from hifi_agent.logging import configure_logging, get_console
 from hifi_agent.optimization import (
     DEFAULT_STAGE11_SCENARIO,
+    RoundComparator,
+    RoundComparisonContext,
+    load_baseline_comparable,
+    load_stage7_comparable,
     run_stage11_optimization,
     synthesize_candida_stage11_scenario,
 )
@@ -437,6 +441,58 @@ def execute_approved_candidate(
         / "stage7_execution.json"
     )
     console.print(f"Receipt: {receipt_path}")
+
+
+@app.command("compare-stage7")
+def compare_stage7_candidate(
+    run_dir: Annotated[Path, typer.Argument(help="Validated baseline run directory.")],
+    attempt_dir: Annotated[
+        Path,
+        typer.Argument(help="Completed immutable Stage 7 candidate attempt directory."),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Stage 8 round audit output directory."),
+    ],
+    round_index: Annotated[
+        int,
+        typer.Option("--round", min=1, max=3, help="Optimization round coordinate."),
+    ] = 1,
+    reference_available: Annotated[
+        bool,
+        typer.Option(
+            "--reference-available/--reference-free",
+            help="Whether reference-based structural metrics may enter selection.",
+        ),
+    ] = True,
+    genome_size_trusted: Annotated[
+        bool,
+        typer.Option(
+            "--genome-size-trusted/--genome-size-untrusted",
+            help="Whether assembly-size ratio may enter automatic selection.",
+        ),
+    ] = False,
+) -> None:
+    """Compare a retained Stage 7 candidate with the current baseline incumbent."""
+    try:
+        comparison = RoundComparator().compare_round(
+            round_index=round_index,
+            incumbent=load_baseline_comparable(run_dir),
+            candidates=[load_stage7_comparable(attempt_dir)],
+            context=RoundComparisonContext(
+                reference_available=reference_available,
+                genome_size_trusted=genome_size_trusted,
+            ),
+            output_dir=output_dir.resolve(),
+        )
+    except (HiFiAgentError, ValueError) as exc:
+        error = exc if isinstance(exc, HiFiAgentError) else InputValidationError(str(exc))
+        abort_with_error(error)
+    console = get_console()
+    console.print(f"[green]Stage 8 outcome: {comparison.outcome}[/green]")
+    console.print(f"Incumbent before: {comparison.incumbent_before}")
+    console.print(f"Incumbent after: {comparison.incumbent_after}")
+    console.print(f"Audit: {output_dir.resolve() / 'round_comparison.json'}")
 
 
 @app.command("synthesize-stage11-anomaly")
