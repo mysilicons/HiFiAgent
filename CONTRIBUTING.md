@@ -10,8 +10,8 @@ Before opening a change, run:
 ruff check .
 ruff format --check .
 mypy
-pytest --cov --cov-fail-under=80
-hifi-agent demo /tmp/hifi-agent-demo
+pytest --cov --cov-fail-under=85
+hifi-agent demo-v2 /tmp/hifi-agent-v2-demo
 ```
 
 Do not commit FASTQ/BAM/CRAM, assembly databases, BUSCO downloads, meryl databases, credentials,

@@ -66,3 +66,16 @@ def test_repository_does_not_track_large_biological_file_extensions() -> None:
     files = [PROJECT_ROOT / path for path in tracked]
     offenders = [path for path in files if path.suffix.lower() in forbidden]
     assert offenders == []
+
+
+def test_ci_uses_resolvable_node24_actions_and_pinned_nextflow() -> None:
+    workflow = (PROJECT_ROOT / ".github/workflows/ci.yml").read_text()
+    assert workflow.count("actions/checkout@v6") == 2
+    assert workflow.count("actions/setup-python@v6") == 2
+    assert "actions/setup-java@v5" in workflow
+    assert "nextflow-io/setup-nextflow" not in workflow
+    assert "nf-core/setup-nextflow" not in workflow
+    assert 'NXF_VER: "25.04.7"' in workflow
+    assert "https://get.nextflow.io" in workflow
+    assert "--cov-fail-under=85" in workflow
+    assert "hifi-agent demo-v2 /tmp/hifi-agent-v2-demo" in workflow
