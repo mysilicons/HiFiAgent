@@ -43,6 +43,8 @@ jobs:
 
   nextflow-resume:
     runs-on: ubuntu-latest
+    env:
+      NXF_VER: "25.04.7"
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -59,8 +61,6 @@ jobs:
           java-version: "21"
 
       - name: Set up Nextflow
-        env:
-          NXF_VER: "25.04.7"
         run: |
           cd /tmp
           curl -fsSL https://get.nextflow.io -o nextflow
