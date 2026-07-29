@@ -1,4 +1,4 @@
-# V1 expert rule catalog
+# V2 rule and comparison catalog
 
 The authoritative definitions are `rules/v1_rules.yaml`; thresholds and provenance are in
 `configs/thresholds.yaml`. Higher priority controls lower priority. Equal-priority conflicts stop
@@ -23,3 +23,29 @@ and emit no candidate.
 
 These are conservative engineering defaults, not universal biological laws. Threshold updates
 must change catalog versions and explain organism, ploidy, evidence source, and tradeoffs.
+
+## V2 proposal and execution gates
+
+V1 rules remain deterministic proposal sources. V2 then enforces the following gates before any
+candidate runs:
+
+1. strict typed schema and known evidence IDs;
+2. hifiasm whitelist and numeric bounds;
+3. global parameter-fingerprint deduplication;
+4. one changed variable by default; explicit approval for multiple variables;
+5. candidate, risk, CPU, walltime, disk, and maximum-three-round budgets;
+6. Safety Arbiter output as an immutable `ApprovedCandidate`;
+7. argv reverse parsing and exact parameter contract.
+
+LLM output enters at gate 1 as an untrusted proposal and has no special authority.
+
+## V2 comparison policy
+
+The packaged `hifi_agent.data/comparison_policy.yaml` is authoritative for V2.0.0. Protected
+required metrics are BUSCO completeness, k-mer completeness/QV, mapped-read fraction, coverage CV,
+and contig N50. Assembly-size ratio applies only with a trusted genome size; QUAST
+misassemblies apply only with a suitable reference. N50 cannot trade away protected correctness.
+
+Comparator outcomes are `INCUMBENT_UPDATED`, `NO_UNIQUE_CANDIDATE`, `STOP_PLATEAU`,
+`STOP_CONFLICT`, `STOP_INSUFFICIENT_METRICS`, plus controller-level `STOP_BUDGET` and
+`STOP_MAX_ROUNDS`. Thresholds are versioned scientific policy, not universal biological laws.

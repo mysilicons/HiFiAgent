@@ -10,11 +10,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_release_version_and_required_files_are_consistent() -> None:
-    assert __version__ == "1.0.0"
+    assert __version__ == "2.0.0"
     pyproject = (PROJECT_ROOT / "pyproject.toml").read_text()
     citation = yaml.safe_load((PROJECT_ROOT / "CITATION.cff").read_text())
-    assert 'version = "1.0.0"' in pyproject
-    assert citation["version"] == "1.0.0"
+    assert 'version = "2.0.0"' in pyproject
+    assert citation["version"] == "2.0.0"
     for relative in (
         "LICENSE",
         "CHANGELOG.md",
@@ -24,6 +24,10 @@ def test_release_version_and_required_files_are_consistent() -> None:
         "docs/rule_catalog.md",
         "docs/release_checklist.md",
         "docs/releases/v1.0.0.md",
+        "docs/releases/v2.0.0.md",
+        "docs/v2_migration.md",
+        "docs/v2_llm_privacy_cost.md",
+        "docs/v2_three_round_example.md",
         "docs/interview_qa.md",
     ):
         assert (PROJECT_ROOT / relative).is_file(), relative
@@ -31,8 +35,8 @@ def test_release_version_and_required_files_are_consistent() -> None:
 
 def test_readme_quickstart_uses_a_real_cli_command() -> None:
     readme = (PROJECT_ROOT / "README.md").read_text()
-    assert "hifi-agent demo /tmp/hifi-agent-demo" in readme
-    assert "Scenarios passed: 9/9" in readme
+    assert "hifi-agent demo-v2 /tmp/hifi-agent-v2-demo" in readme
+    assert "Scenarios passed: 5/5" in readme
     assert "Git remote" in readme
 
 

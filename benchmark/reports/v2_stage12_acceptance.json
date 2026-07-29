@@ -1,0 +1,72 @@
+{
+  "schema_version": "2.0",
+  "stage": 12,
+  "date": "2026-07-29",
+  "result": "PASS",
+  "release_version": "2.0.0",
+  "defects": {
+    "p0_open": 0,
+    "p1_open": 0,
+    "source": "docs/v2_known_defects.md and prior stage acceptance records"
+  },
+  "portable_quality_gates": {
+    "pytest_passed": 353,
+    "pytest_skipped_explicit_real": 17,
+    "coverage_percent": 87.14,
+    "coverage_required_percent": 85.0,
+    "ruff": "PASS",
+    "ruff_format": "PASS",
+    "mypy_strict": "PASS",
+    "nextflow_config_parse": "PASS",
+    "nextflow_version": "25.04.7",
+    "java_version": "21"
+  },
+  "current_v2_real_acceptance": {
+    "tests_passed": 4,
+    "candida_accession": "SRR23724250",
+    "candida_fastq_bytes": 9685432968,
+    "drosophila_accession": "SRR33554835",
+    "drosophila_fastq_bytes": 34915862206,
+    "full_fastq_checksums": "PASS",
+    "candidate_change": {
+      "variable_count": 1,
+      "disable_post_join": true,
+      "parameter_contract": "PASS",
+      "actual_argv_lineage": "PASS"
+    },
+    "terminal_outcome": "STOP_PLATEAU",
+    "optimization_improvement_claimed": false,
+    "deepseek": {
+      "status": "SUCCESS",
+      "model": "deepseek-v4-pro",
+      "prompt_tokens": 5855,
+      "completion_tokens": 2115,
+      "total_tokens": 7970,
+      "raw_proposal_count": 0,
+      "sensitive_payload_checks": "PASS"
+    }
+  },
+  "fixture_acceptance": {
+    "three_round_loop": "PASS",
+    "terminal_outcome": "STOP_MAX_ROUNDS",
+    "portable_demo_scenarios": "5/5"
+  },
+  "release_artifact": {
+    "filename": "hifi_agent-2.0.0-py3-none-any.whl",
+    "sha256": "b448d95e2a8dd90d62774be0985772493fbc47e0d527286fc2de158d1d44a6bd",
+    "isolated_install": "PASS",
+    "packaged_comparison_policy": "PASS",
+    "installed_demo": "PASS"
+  },
+  "historical_v1_real_suite": {
+    "status": "NOT_RELEASE_EVIDENCE",
+    "reason": "11 historical tests target removed V1 results/Candida_albicans_phase6 artifacts",
+    "observed_when_globally_enabled": {
+      "passed": 3,
+      "failed": 12,
+      "skipped_live_api": 1
+    }
+  },
+  "clean_clone": "PENDING_FINAL_COMMIT",
+  "git_tag": "PENDING_CLEAN_TREE"
+}

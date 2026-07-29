@@ -7,7 +7,11 @@ import typer
 from pydantic import ValidationError
 
 from hifi_agent.agent import AgentController, AssemblyConfig, ExistingRunAgentTools
-from hifi_agent.benchmarking import run_benchmark, run_v2_benchmark
+from hifi_agent.benchmarking import (
+    run_benchmark,
+    run_v2_benchmark,
+    run_v2_portable_demo,
+)
 from hifi_agent.config import validate_config_file
 from hifi_agent.constants import APP_NAME, __version__
 from hifi_agent.exceptions import (
@@ -788,6 +792,28 @@ def demo(
         f"Scenarios passed: {sum(item.passed for item in result.scenarios)}/{len(result.scenarios)}"
     )
     console.print(f"Readable report: {output_dir.resolve() / 'v1_benchmark.md'}")
+
+
+@app.command("demo-v2")
+def demo_v2(
+    output_dir: Annotated[
+        Path,
+        typer.Argument(help="Portable V2 demo output directory."),
+    ] = Path("demo_v2_output"),
+) -> None:
+    """Run the data-free V2 policy and comparator demo."""
+    try:
+        result = run_v2_portable_demo(output_dir)
+    except (HiFiAgentError, ValidationError, OSError, ValueError) as exc:
+        abort_with_error(RuleEvaluationError(f"V2 demo failed: {exc}"))
+    console = get_console()
+    color = "green" if result.result == "PASS" else "red"
+    passed = sum(item.passed for item in result.safety_scenarios)
+    console.print(f"[{color}]Portable V2 demo: {result.result}[/{color}]")
+    console.print(f"Scenarios passed: {passed}/{len(result.safety_scenarios)}")
+    console.print(f"Readable report: {output_dir.resolve() / 'v2_portable_demo.md'}")
+    if result.result != "PASS":
+        raise typer.Exit(code=1)
 
 
 def main() -> None:

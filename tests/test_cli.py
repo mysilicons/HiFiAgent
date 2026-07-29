@@ -38,6 +38,7 @@ def test_help_lists_initial_commands() -> None:
     assert "compare-stage7" in result.output
     assert "report-v2" in result.output
     assert "benchmark-v2" in result.output
+    assert "demo-v2" in result.output
     assert "optimize" in result.output
     assert "synthesize-stage11-anomaly" in result.output
 
@@ -46,7 +47,7 @@ def test_version_option() -> None:
     result = runner.invoke(app, ["--version"])
 
     assert result.exit_code == ExitCode.OK
-    assert "hifi-agent 1.0.0" in result.output
+    assert "hifi-agent 2.0.0" in result.output
 
 
 def test_placeholder_command_uses_project_exit_code() -> None:

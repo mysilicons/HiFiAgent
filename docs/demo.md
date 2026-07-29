@@ -1,17 +1,32 @@
-# 3–5 minute demo
+# V2 demos
 
-The portable demo exercises the real schemas and rule engine without shipping sequencing data:
+## Ten-minute portable demo
 
 ```bash
-hifi-agent demo /tmp/hifi-agent-demo
-sed -n '1,160p' /tmp/hifi-agent-demo/v1_benchmark.md
+hifi-agent demo-v2 /tmp/hifi-agent-v2-demo
+sed -n '1,160p' /tmp/hifi-agent-v2-demo/v2_portable_demo.md
 ```
 
-The accompanying animated asset is `docs/assets/hifi_agent_demo.gif`; one playback is 3 minutes
-36 seconds. It shows install/version, normal baseline retention, low-coverage stop, bounded purge
-candidate, metric-conflict stop, real Candida evidence, rules-vs-RAG safety, and final acceptance.
+Expected output is `Scenarios passed: 5/5`. It loads the packaged V2 comparison policy and invokes
+the production `RoundComparator` on deterministic metric fixtures covering safe improvement, hard
+regression, plateau, missing core metrics, and Pareto conflict. Its JSON says
+`biological_data_used: false`; it is an installation/safety demo, not biology.
 
-The real report snapshot is `docs/assets/candida_report_snapshot.png`. Its values come from
-`results/Candida_albicans_phase6/05_report/final_report.md`: SRR23724250-derived reads, 22,812,604
-bp assembly, N50 1,247,647 bp, BUSCO 98.2% complete, and the safe
-`REVIEW_GENOME_SIZE_ESTIMATE` action. It is a rendered summary, not an untracked biological result.
+## Genuine Candida report snapshot
+
+![Genuine Candida V2 report snapshot](assets/v2_candida_report_snapshot.svg)
+
+The snapshot is generated from the retained Stage 10/11 acceptance values:
+
+- genuine accession `SRR23724250`;
+- completed repaired single-variable candidate;
+- exact parameter contract `PASS`;
+- actual argv lineage `PASS`;
+- terminal `STOP_PLATEAU`;
+- material improvement rate `0.0`;
+- no biological improvement claim.
+
+Machine-readable sources are
+`benchmark/reports/v2_stage10_acceptance.json` and
+`benchmark/reports/v2_stage11_acceptance.json`. The Drosophila accession is used only for full
+FASTQ integrity/scale validation; no Drosophila assembly is shown.

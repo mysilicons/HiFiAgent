@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+  <title id="title">Genuine Candida HiFi Agent V2 report snapshot</title>
+  <desc id="desc">A release snapshot showing PASS contract and a scientifically conservative STOP_PLATEAU outcome.</desc>
+  <rect width="1280" height="720" fill="#07111f"/>
+  <rect x="48" y="42" width="1184" height="636" rx="24" fill="#0d1b2a" stroke="#29445f" stroke-width="2"/>
+  <text x="88" y="108" fill="#f4f7fb" font-family="sans-serif" font-size="34" font-weight="700">HiFi Agent V2 · genuine Candida acceptance</text>
+  <text x="88" y="148" fill="#9db0c5" font-family="monospace" font-size="19">SRR23724250 · Stage 10/11 retained evidence · 2026-07-29</text>
+  <rect x="88" y="190" width="330" height="108" rx="14" fill="#102d27" stroke="#29a66a"/>
+  <text x="112" y="230" fill="#9ee6bd" font-family="sans-serif" font-size="18">PARAMETER CONTRACT</text>
+  <text x="112" y="274" fill="#45d483" font-family="monospace" font-size="34" font-weight="700">PASS</text>
+  <rect x="444" y="190" width="354" height="108" rx="14" fill="#2e2511" stroke="#d7a62d"/>
+  <text x="468" y="230" fill="#efd38d" font-family="sans-serif" font-size="18">TERMINAL OUTCOME</text>
+  <text x="468" y="274" fill="#ffc857" font-family="monospace" font-size="30" font-weight="700">STOP_PLATEAU</text>
+  <rect x="824" y="190" width="360" height="108" rx="14" fill="#142338" stroke="#5087c7"/>
+  <text x="848" y="230" fill="#a8c9ee" font-family="sans-serif" font-size="18">ACTUAL ARGV LINEAGE</text>
+  <text x="848" y="274" fill="#75b3fa" font-family="monospace" font-size="34" font-weight="700">PASS</text>
+  <text x="88" y="354" fill="#f4f7fb" font-family="sans-serif" font-size="23" font-weight="700">Executed repaired candidate</text>
+  <rect x="88" y="376" width="1096" height="86" rx="12" fill="#081521" stroke="#263e56"/>
+  <text x="112" y="411" fill="#9db0c5" font-family="monospace" font-size="18">origin=rule   variables=1   disable_post_join=true</text>
+  <text x="112" y="444" fill="#dce7f2" font-family="monospace" font-size="18">approved parameters → hifiasm argv → parsed manifest → QC metrics → report</text>
+  <text x="88" y="520" fill="#f4f7fb" font-family="sans-serif" font-size="23" font-weight="700">Scientific interpretation</text>
+  <text x="88" y="560" fill="#c8d5e3" font-family="sans-serif" font-size="20">The genuine candidate completed safely but produced no material improvement.</text>
+  <text x="88" y="594" fill="#c8d5e3" font-family="sans-serif" font-size="20">Retain baseline; do not claim optimization success. Drosophila is an input audit only.</text>
+  <line x1="88" y1="625" x2="1184" y2="625" stroke="#29445f"/>
+  <text x="88" y="654" fill="#7f95aa" font-family="monospace" font-size="15">Source: benchmark/reports/v2_stage10_acceptance.json + v2_stage11_acceptance.json</text>
+</svg>

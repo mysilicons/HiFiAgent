@@ -17,6 +17,7 @@ from hifi_agent.benchmarking.v2_models import (
     V2AblationResult,
     V2BenchmarkReport,
     V2DatasetAudit,
+    V2PortableDemoReport,
     V2SafetyScenarioResult,
 )
 from hifi_agent.exceptions import InputValidationError
@@ -30,6 +31,49 @@ from hifi_agent.schemas.metrics import AssemblyMetrics
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_SAMPLE_MANIFEST = PROJECT_ROOT / "configs/v2_real_benchmark_samples.yaml"
+
+
+def run_v2_portable_demo(
+    output_dir: Path,
+    *,
+    generated_at: datetime | None = None,
+) -> V2PortableDemoReport:
+    """Exercise the production comparator without biological input or external tools."""
+    scenarios = _safety_scenarios()
+    report = V2PortableDemoReport(
+        generated_at=generated_at or datetime.now(UTC),
+        result="PASS" if all(item.passed for item in scenarios) else "FAIL",
+        safety_scenarios=scenarios,
+        disclaimer=(
+            "This portable demo uses deterministic metric fixtures. It validates installed "
+            "V2 schemas, policy loading, comparison gates, and stop outcomes; it is not a "
+            "biological assembly result."
+        ),
+    )
+    destination = output_dir.resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    (destination / "v2_portable_demo.json").write_text(report.model_dump_json(indent=2) + "\n")
+    lines = [
+        "# HiFi Agent V2 portable demo",
+        "",
+        f"- Result: **{report.result}**",
+        "- Biological data used: **false**",
+        f"- Production component: `{report.production_component}`",
+        f"- Scenarios passed: **{sum(item.passed for item in scenarios)}/{len(scenarios)}**",
+        "",
+        "## Safety scenarios",
+        "",
+        "| Scenario | Expected | Observed | Pass |",
+        "|---|---|---|---:|",
+    ]
+    lines.extend(
+        f"| {item.scenario_id} | {item.expected_outcome} | "
+        f"{item.observed_outcome} | {item.passed} |"
+        for item in scenarios
+    )
+    lines.extend(["", "## Boundary", "", report.disclaimer, ""])
+    (destination / "v2_portable_demo.md").write_text("\n".join(lines))
+    return report
 
 
 class _SampleEntry(BaseModel):

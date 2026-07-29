@@ -10,8 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from hifi_agent.exceptions import InputValidationError
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_COMPARISON_POLICY = PROJECT_ROOT / "configs/comparison_policy.yaml"
+DEFAULT_COMPARISON_POLICY = Path(__file__).resolve().parents[1] / "data" / "comparison_policy.yaml"
 
 MetricDirection = Literal["higher", "lower", "target_one"]
 ThresholdMode = Literal["absolute", "relative"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -45,6 +46,23 @@ def test_real_stage10_report_and_stage11_two_sample_benchmark() -> None:
         index_path=PROJECT_ROOT / "knowledge/index.json",
     )
     report = V2FinalReport.model_validate_json(outputs.summary_json.read_text())
+    live_receipt = json.loads(
+        (PROJECT_ROOT / "benchmark/reports/v2_stage6_live_deepseek_acceptance.json").read_text()
+    )
+    assert live_receipt["provider"] == "deepseek"
+    assert live_receipt["llm_status"] == "SUCCESS"
+    assert live_receipt["usage"] == {
+        "prompt_tokens": 5855,
+        "completion_tokens": 2115,
+        "total_tokens": 7970,
+    }
+    assert live_receipt["raw_proposal_count"] == 0
+    assert live_receipt["sensitive_payload_checks"] == {
+        "fastq_or_reference_sequence_sent": False,
+        "absolute_workspace_path_present": False,
+        "api_key_present": False,
+        "environment_variable_present": False,
+    }
     assert report.terminal_outcome == "STOP_PLATEAU"
     assert report.outcome_class == "STOPPED"
     assert report.optimization_succeeded is False

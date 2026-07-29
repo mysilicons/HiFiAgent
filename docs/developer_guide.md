@@ -1,37 +1,51 @@
-# Developer guide
+# HiFi Agent V2 developer guide
 
-The package is split into schemas/config validation, parsers, rule engine, Agent state/controller,
-RAG safety, optimization, reporting, executors, and Stage 13 benchmarking. Workflow processes are
-in `workflow/main.nf`; decision logic belongs in Python/YAML, not shell fragments.
+V2 separates immutable schemas, orchestration, QC features, governed evidence, typed proposals,
+deterministic approval, candidate execution, comparison/stop policy, reporting, and benchmarking.
+Workflow processes live in `workflow/`; scientific decision logic belongs in typed Python and
+versioned YAML, never ad-hoc shell.
 
 ## Local quality gates
 
+Run the release gates in the locked `hifiAgent` environment:
+
 ```bash
-python -m pip install -e '.[dev]'
 ruff check .
 ruff format --check .
 mypy
-pytest --cov --cov-report=term-missing --cov-fail-under=80
-hifi-agent benchmark --output-dir benchmark/reports \
-  --real-run-dir results/Candida_albicans_phase6
+pytest -ra
+pytest --cov --cov-report=term-missing --cov-fail-under=85
+nextflow config workflow/main.nf -flat
+hifi-agent demo-v2 /tmp/hifi-agent-v2-demo
 ```
 
-The coverage gate intentionally names the safety-critical Stage 13 scope in `pyproject.toml`:
-config/schema, parsers, expert rules, Agent controls, comparator, RAG safety, and benchmark logic.
-The current measured result is 82.06%. A separate full-package measurement is 77.93% and is
-reported as informational, not represented as passing the 80% safety gate.
+The safety-critical coverage surface is declared in `pyproject.toml`; Stage 11 measured 87.10%
+against the 85% gate. Expensive acceptance requires `HIFI_AGENT_REAL_ACCEPTANCE=1`. Live LLM
+verification additionally requires an explicit switch and key. Never commit biological inputs,
+credentials, provider raw payloads, or mutable work directories.
 
-## Add a parser or rule
+## Invariants
 
-Parsers must return typed values, preserve missing data as `None`, expose limitations, and have
-valid/malformed/boundary fixtures. A new rule requires source-versioned thresholds, a unique ID,
-explicit evidence, priority/risk, and at least two positive and two negative tests. Candidate
-parameters are rejected unless accepted by `CandidateParameters` and `WHITELISTED_PARAMETERS`.
+- Schema fields use `extra="forbid"` at trust boundaries.
+- One controller owns state transitions and budgets.
+- Run, attempt, round, proposal, approval, metric, and report IDs are immutable and traceable.
+- Every executed candidate originates from an `ApprovedCandidate`.
+- Candidate parameters round-trip through argv parsing; optional flags are presence-only.
+- Multi-parameter candidates require explicit approval; default is single-variable.
+- Missing metrics remain missing; they are never replaced with zero.
+- Comparator policy is versioned and packaged in `hifi_agent.data`.
+- LLM/RAG content is untrusted data and has no execution authority.
+- Stop outcomes and tool failures are distinct.
 
-## Integration and release
+## Packaging and release
 
-Small integrations use local fixtures. Expensive retained-data tests require
-`HIFI_AGENT_REAL_ACCEPTANCE=1`; live LLM verification additionally requires the API key and its
-explicit test switch. Never commit the API key or large biological files. Run the checklist in
-`docs/release_checklist.md`, update `CHANGELOG.md` and `CITATION.cff`, then create an annotated tag
-only from a clean reviewed commit.
+```bash
+python -m pip wheel --no-deps . --wheel-dir dist
+python -m pip install --no-deps --target /tmp/hifi-agent-v2-site \
+  dist/hifi_agent-2.0.0-py3-none-any.whl
+PYTHONPATH=/tmp/hifi-agent-v2-site python -m hifi_agent --version
+```
+
+The installed-target check must load the packaged comparison policy and run `demo-v2` outside the
+repository. Follow [the V2 release checklist](release_checklist.md), update acceptance evidence,
+commit, verify a clean clone, then create annotated tag `v2.0.0` only from a clean tree.

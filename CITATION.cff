@@ -2,15 +2,16 @@ cff-version: 1.2.0
 message: "If you use HiFi Agent, please cite this software release."
 title: "HiFi Agent: a constrained PacBio HiFi assembly assistant"
 type: software
-version: 1.0.0
-date-released: 2026-07-14
+version: 2.0.0
+date-released: 2026-07-29
 authors:
   - name: "HiFi Agent contributors"
 license: MIT
 repository-code: "https://github.com/mysilicons/HiFiAgent"
 abstract: >-
   A conservative, evidence-traceable agent for single-sample PacBio HiFi genome
-  assembly with deterministic expert rules, bounded optimization, and optional RAG explanation.
+  assembly with deterministic expert rules, auditable three-round optimization,
+  typed LLM proposals, deterministic safety arbitration, and real-data validation.
 keywords:
   - genome assembly
   - PacBio HiFi

@@ -1,0 +1,63 @@
+schema_version: "2.0"
+policy_version: "2.0.0"
+
+metrics:
+  assembly_size_ratio:
+    direction: target_one
+    material_delta: 0.05
+    required: false
+    applicability: trusted_genome_size
+    note: Closer to one is preferred only when genome-size evidence is trusted.
+  busco_complete:
+    direction: higher
+    material_delta: 1.0
+    required: true
+    hard_regression_delta: 2.0
+    acceptance_min: 95.0
+    note: Gene-space completeness cannot be traded for contiguity.
+  busco_duplicated:
+    direction: lower
+    material_delta: 1.0
+    required: false
+    note: Lower duplication is preferred but interpreted with ploidy and assembly size.
+  kmer_completeness:
+    direction: higher
+    material_delta: 1.0
+    required: true
+    hard_regression_delta: 2.0
+    acceptance_min: 90.0
+    note: Read-supported k-mer completeness is a protected correctness metric.
+  kmer_qv:
+    direction: higher
+    material_delta: 1.0
+    required: true
+    hard_regression_delta: 2.0
+    note: Consensus k-mer QV is a protected correctness metric.
+  mapped_read_fraction:
+    direction: higher
+    material_delta: 0.01
+    required: true
+    hard_regression_delta: 0.02
+    acceptance_min: 0.95
+    note: Mapping support is protected but is not sufficient by itself.
+  coverage_cv:
+    direction: lower
+    material_delta: 0.10
+    required: true
+    hard_regression_delta: 0.25
+    note: A large increase in coverage variability is a hard regression.
+  contig_n50:
+    direction: higher
+    material_delta: 0.10
+    material_mode: relative
+    required: true
+    note: N50 is secondary and cannot override protected correctness regressions.
+  quast_misassemblies:
+    direction: lower
+    material_delta: 0.10
+    material_mode: relative
+    required: false
+    applicability: reference
+    hard_regression_delta: 0.20
+    hard_regression_mode: relative
+    note: Reference-supported structural errors apply only in reference-based evaluation.

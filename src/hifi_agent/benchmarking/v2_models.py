@@ -89,3 +89,17 @@ class V2BenchmarkReport(BaseModel):
     real_candida_candidate_contract: str
     real_candida_candidate_parameter_count: int = Field(ge=1)
     limitations: list[str]
+
+
+class V2PortableDemoReport(BaseModel):
+    """Data-free installation and safety demonstration result."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["2.0"] = "2.0"
+    generated_at: datetime
+    result: Literal["PASS", "FAIL"]
+    biological_data_used: Literal[False] = False
+    production_component: Literal["RoundComparator"] = "RoundComparator"
+    safety_scenarios: list[V2SafetyScenarioResult] = Field(min_length=5)
+    disclaimer: str

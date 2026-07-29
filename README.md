@@ -1,8 +1,8 @@
-# HiFi Agent
+# HiFi Agent V2
 
 HiFi Agent 是一个面向单样本 PacBio HiFi 真核基因组组装的受控分析助手。它把输入验证、组装前质控、hifiasm 组装、组装后评价、专家规则决策、有限候选比较和最终报告组织成可重复的命令行流程。
 
-项目的核心目标是：在可审计的边界内帮助用户判断一次 HiFi-only 组装是否足够可靠，或者是否需要停止复核、有限重试或生成解释报告。规则引擎是参数决策的权威；可选 RAG/LLM 只用于解释和证据组织，不直接生成 shell 命令或越过参数白名单。
+项目的核心目标是：在可审计的边界内帮助用户判断一次 HiFi-only 组装是否足够可靠，或者是否需要停止复核、有限重试或生成解释报告。V2 最多运行三轮、每轮默认一个候选。规则和 Safety Arbiter 是执行授权的权威；可选 LLM 可基于净化后的结构化证据提出白名单内的 typed candidate，但不能授权参数、执行 shell、绕过预算或改变停止结论。
 
 ## 功能特性
 
@@ -12,20 +12,21 @@ HiFi Agent 是一个面向单样本 PacBio HiFi 真核基因组组装的受控�
 - 基于版本化 YAML 规则的 `BASELINE`、`RETRY`、`STOP` 决策。
 - 受预算限制的候选组装比较，只允许安全白名单参数。
 - Markdown、JSON、TSV 等可读和可机器处理的报告产物。
-- 可选 RAG/LLM 解释层，用于生成带来源的决策说明。
-- 无需测序数据的便携 demo，可快速验证安装和规则流程。
+- 可选 RAG/LLM 层，用于带来源的解释和受 Schema 约束的候选提议。
+- 最多三轮的单变量优先优化、Pareto 冲突停止和参数—argv—报告追踪。
+- 无需测序数据的 V2 便携 demo，可快速验证安装、比较策略和停止逻辑。
 
 ## 适用范围
 
-HiFi Agent V1 支持：
+HiFi Agent V2 支持：
 
 - 单个样本的一组或多组 PacBio HiFi reads。
 - 真核基因组 HiFi-only contig 组装。
-- 二倍体样本优先的保守评价流程。
+- 二倍体样本优先的保守评价流程，以及最多三轮的受控候选闭环。
 - Linux 本地执行。
 - CLI 优先的可重复运行。
 
-V1 不支持：
+V2 不支持：
 
 - Hi-C 分相组装。
 - trio / parental reads 分型。
@@ -57,25 +58,26 @@ hifi-agent --version
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
-hifi-agent demo /tmp/hifi-agent-demo
+hifi-agent demo-v2 /tmp/hifi-agent-v2-demo
 ```
 
 ## 快速开始
 
-运行无需测序数据的 demo：
+下面是 V2 十分钟 quickstart。它不下载或伪造生物数据，只验证安装后的生产 Schema、随 wheel 分发的比较策略、`RoundComparator` 和五个安全结论：
 
 ```bash
-hifi-agent demo /tmp/hifi-agent-demo
-sed -n '1,160p' /tmp/hifi-agent-demo/v1_benchmark.md
+hifi-agent --version
+hifi-agent demo-v2 /tmp/hifi-agent-v2-demo
+sed -n '1,160p' /tmp/hifi-agent-v2-demo/v2_portable_demo.md
 ```
 
 预期报告中包含：
 
 ```text
-Scenarios passed: 9/9
+Scenarios passed: 5/5
 ```
 
-该 demo 会执行真实 schema、规则引擎、参数白名单、停止策略和报告生成逻辑，但不会伪装成真实生物学组装。
+该 demo 的 JSON 明确记录 `biological_data_used: false`，因此只能作为安装和安全逻辑检查，不能作为生物学验收。真实 Candida 和 Drosophila 验收见 [V2 发布说明](docs/releases/v2.0.0.md)。
 
 ## 配置样本
 
@@ -110,6 +112,11 @@ agent:
   max_cpu_hours: 10000
   max_walltime_hours: 168
   objective: balanced
+
+optimization:
+  max_rounds: 3
+  max_candidates_per_round: 1
+  allow_multi_parameter_candidates: false
 
 kmer:
   k: 21
@@ -164,7 +171,7 @@ outdir: .
 hifi-agent validate sample.yaml
 ```
 
-验证会检查配置 schema、输入路径、FASTQ/GZIP 基本完整性、资源预算和 V1 禁止字段，并写入：
+验证会检查配置 schema、输入路径、FASTQ/GZIP 基本完整性、资源预算和禁止字段，并写入：
 
 ```text
 <outdir>/00_metadata/resolved_config.yaml
@@ -254,7 +261,7 @@ export DEEPSEEK_MODEL=deepseek-v4-pro
 hifi-agent explain /absolute/path/to/results/My_sample --llm
 ```
 
-解释层不会改变规则决策，不会新增候选参数，也不会生成可执行命令。
+LLM 输出必须通过严格 JSON Schema、参数白名单、证据引用、重复检查和 Safety Arbiter。它可以“提议” typed candidate，但不能把提议变成 `ApprovedCandidate`，不能直接执行，也不能生成任意 shell 命令。隐私边界和真实 DeepSeek token 记录见 [LLM 数据隐私与费用](docs/v2_llm_privacy_cost.md)。
 
 ### 8. 生成最终报告
 
@@ -294,8 +301,13 @@ hifi-agent optimize RUN_DIR                  运行有限候选规划和比较
 hifi-agent rag-index                         构建本地 RAG 知识索引
 hifi-agent explain RUN_DIR [--no-llm]        生成规则和 RAG 解释
 hifi-agent report RUN_DIR                    生成最终报告
-hifi-agent benchmark --fixtures-only         运行便携 benchmark
-hifi-agent demo OUTPUT_DIR                   运行无数据 demo
+hifi-agent assemble CONFIG                   运行 V2 baseline 控制器
+hifi-agent propose RUN_DIR                   生成规则/可选 LLM typed proposals
+hifi-agent execute-candidate RUN APPROVED    仅执行已审批候选
+hifi-agent compare-stage7 RUN ATTEMPT ...    比较 baseline 与真实候选
+hifi-agent report-v2 RUN_DIR [required opts] 生成 V2 可追踪报告
+hifi-agent benchmark-v2 REPORT --output-dir  运行真实数据审计和 A-D 消融
+hifi-agent demo-v2 OUTPUT_DIR                运行无生物数据 V2 demo
 ```
 
 ## 输出目录
@@ -307,9 +319,10 @@ hifi-agent demo OUTPUT_DIR                   运行无数据 demo
 01_pre_qc/       FASTQ、seqkit、NanoPlot、k-mer 和 GenomeScope 指标
 02_assembly/     hifiasm baseline 组装、FASTA/GFA/bin、命令 manifest
 03_post_qc/      QUAST、BUSCO、Merqury、mapping 和聚合评价指标
-04_decisions/    专家规则决策、RAG 证据和解释
-05_agent/        Agent 状态、轨迹、预算和候选比较
-05_report/       最终 Markdown/JSON/TSV 报告
+04_decisions/    专家规则、typed proposal、审批、比较和停止证据
+05_agent/        Agent 状态、轨迹、预算和轮次快照
+05_report/       V2 Markdown/JSON/TSV 报告与实际 argv
+rounds/          round_01..round_03 的 immutable candidate/attempt 记录
 logs/            Nextflow trace、timeline、report 和 DAG
 ```
 
@@ -375,6 +388,9 @@ logs/            Nextflow trace、timeline、report 和 DAG
 ## 文档
 
 - [用户指南](docs/user_guide.md)
+- [V1→V2 迁移指南](docs/v2_migration.md)
+- [LLM 数据隐私与费用](docs/v2_llm_privacy_cost.md)
+- [三轮优化示例](docs/v2_three_round_example.md)
 - [架构说明](docs/architecture.md)
 - [规则目录](docs/rule_catalog.md)
 - [演示说明](docs/demo.md)
@@ -384,7 +400,7 @@ logs/            Nextflow trace、timeline、report 和 DAG
 如果你在研究或项目中使用 HiFi Agent，请引用本软件发布。引用元数据见 [CITATION.cff](CITATION.cff)。
 
 ```text
-HiFi Agent contributors. HiFi Agent: a constrained PacBio HiFi assembly assistant. Version 1.0.0. 2026.
+HiFi Agent contributors. HiFi Agent: a constrained PacBio HiFi assembly assistant. Version 2.0.0. 2026.
 ```
 
 ## 许可证

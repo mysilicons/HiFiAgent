@@ -3,7 +3,7 @@
 from enum import IntEnum
 
 APP_NAME = "hifi-agent"
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 
 
 class ExitCode(IntEnum):
