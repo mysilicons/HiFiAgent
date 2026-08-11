@@ -2,6 +2,31 @@
 
 All notable changes are documented here. This project follows Semantic Versioning.
 
+## [Unreleased] - V3 stage 8
+
+### Added
+
+- Executable portable fixture toolchain running baseline plus three rounds through the real CLI,
+  subprocess, Nextflow runner, parsers, filesystem contracts, reports, and deep verifier.
+- Checksummed, round-bound recorded LLM transcript replay for offline hybrid acceptance.
+- CLI exit/report acceptance for scientific success, human review, tool failure, required-LLM
+  failure, and round-2 SIGTERM/resume without rerun or rebilling.
+- V3 quickstart, decision-mode, resume, budget, result-interpretation, architecture, and ADR docs.
+
+### Changed
+
+- Split the 1481-line coordinator into one 824-line authoritative state machine plus round,
+  terminal, artifact-support, and port/result modules; no second controller or state was added.
+- Governed retrieval now preserves source diversity and accepts a complete locked version token in
+  a tool banner; safety authorization evaluates all matching evidence chunks for a source.
+- Nextflow SIGINT/SIGTERM return codes are classified as resumable interruption.
+- CLI help labels advanced options and states that deprecated V2 commands/aliases are removed.
+
+### Removed
+
+- No V2 compatibility command, reader, migration path, execution adapter, or deprecated alias was
+  restored for stage 8.
+
 ## [2.0.0] - 2026-07-29
 
 ### Added

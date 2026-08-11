@@ -1,0 +1,45 @@
+{
+  "schema_id": "hifi-agent",
+  "status": "FAIL_REMEDIATED_AWAITING_RERUN",
+  "checked_at": "2026-08-10T11:20:00Z",
+  "run_uuid": "b0f4c26111e84587a5501ef2f5276f30",
+  "run_dir": "results/Drosophila_melanogaster_acceptance",
+  "code_commit": "1786dcd3cd5b8ecae20b767a5a0c7328656bac6a",
+  "worktree_clean_at_review": false,
+  "terminal_outcome": "STOP_INSUFFICIENT_EVIDENCE",
+  "process_exit_code": 0,
+  "stop_reason_codes": [
+    "BASELINE_REQUIRED_METRICS_MISSING"
+  ],
+  "baseline": {
+    "status": "COMPLETED",
+    "comparison_eligible": true,
+    "assembly_size": 181039394,
+    "contig_count": 229,
+    "contig_n50": 23623430,
+    "busco_complete": 99.6,
+    "busco_duplicated": 0.9,
+    "mapped_read_fraction": 0.9972,
+    "coverage_cv": 0.4764496350290941,
+    "kmer_qv": null,
+    "kmer_completeness": null,
+    "tool_failures": [
+      "merqury"
+    ]
+  },
+  "candidate_count": 0,
+  "verification": {
+    "verify_run_deep": "PASS",
+    "verify_real": "FAIL_MISSING_ELIGIBLE_CANDIDATE"
+  },
+  "root_cause": "MERQURY was set to the symlink directory instead of the resolved Merqury distribution root.",
+  "remediation": {
+    "status": "PASS",
+    "real_merqury_smoke_exit_code": 0,
+    "real_merqury_smoke_qv": 65.048,
+    "real_merqury_smoke_completeness": 99.0775,
+    "conda_r_plot": "PASS",
+    "next_run_dir": "results/Drosophila_melanogaster_acceptance_run2"
+  },
+  "stage9_accepted": false
+}

@@ -1,9 +1,5 @@
 nextflow.enable.dsl = 2
 
-if (!params.outdir || !params.control_dir) {
-    error 'Required parameters: --outdir and --control_dir'
-}
-
 process FIRST_STEP {
     publishDir "${params.outdir}/published", mode: 'copy', overwrite: true
 
@@ -36,6 +32,10 @@ process SECOND_STEP {
 }
 
 workflow {
+    if (!params.outdir || !params.control_dir) {
+        error 'Required parameters: --outdir and --control_dir'
+    }
+
     FIRST_STEP()
     SECOND_STEP(FIRST_STEP.out.completed)
 }

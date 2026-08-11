@@ -1,47 +1,5 @@
 nextflow.enable.dsl = 2
 
-def sampleId = params.sample_id as String
-def assemblyRunId = params.assembly_run_id ? params.assembly_run_id as String : 'baseline'
-def hifiasmPurgeLevel = params.hifiasm_purge_level == null ? 3 : params.hifiasm_purge_level as int
-def hifiasmPurgeSimilarity = params.hifiasm_purge_similarity == null ? 0.55 : params.hifiasm_purge_similarity as double
-def hifiasmHomCov = params.hifiasm_hom_cov ? params.hifiasm_hom_cov as String : ''
-def hifiasmDisablePostJoin = params.hifiasm_disable_post_join == null ? false : params.hifiasm_disable_post_join.toString().toBoolean()
-def validationReceipt = params.validation_receipt ? params.validation_receipt as String : ''
-def binReuseManifest = params.bin_reuse_manifest ? params.bin_reuse_manifest as String : ''
-def readsPattern = params.reads
-def readsManifest = params.reads_manifest
-def kmerReadsManifest = params.kmer_reads_manifest ?: readsManifest
-def kmerSource = params.kmer_source ?: 'same_data_advisory'
-def expectedGenomeSize = params.expected_genome_size ? params.expected_genome_size as String : ''
-def kmerK = params.kmer_k ?: 21
-def pythonPath = "${projectDir}/../src"
-def runAssembly = params.run_assembly == null ? true : params.run_assembly.toString().toBoolean()
-def runPostQc = params.run_post_qc == null ? true : params.run_post_qc.toString().toBoolean()
-def referenceGenome = params.reference_genome ? params.reference_genome as String : ''
-def buscoLineage = params.busco_lineage ? params.busco_lineage as String : ''
-def buscoDownloadPath = params.busco_download_path as String
-def buscoTimeoutMinutes = params.busco_timeout_minutes ?: 240
-def coverageWindowSize = params.coverage_window_size ?: 10000
-def mappingMinReadLength = params.mapping_min_read_length ?: 1000
-def mappingMinMeanQscore = params.mapping_min_mean_qscore ?: 20.0
-def kmerLowCoveragePeakThreshold = params.kmer_low_coverage_peak_threshold ?: 10.0
-
-if (!sampleId) {
-    error "Missing required parameter: --sample_id"
-}
-
-if (!validationReceipt || !new File(validationReceipt).isFile()) {
-    error "Missing validated input receipt: --validation_receipt"
-}
-
-if (!(sampleId ==~ /^[A-Za-z0-9_-]+$/)) {
-    error "Invalid --sample_id '${sampleId}'. Use only letters, numbers, underscores, and hyphens."
-}
-
-if (!readsPattern && !readsManifest) {
-    error "Missing required parameter: --reads or --reads_manifest"
-}
-
 process FASTQ_PROBE {
     tag "${sample_id}"
     label 'small'
@@ -122,14 +80,11 @@ process SEQKIT_STATS {
     """
     set -euo pipefail
 
-    if command -v seqkit >/dev/null 2>&1; then
-        seqkit stats -a -T -j "${task.cpus}" ${reads} > seqkit_stats.tsv
-    elif [ -x /home/gw/software/seqkit ]; then
-        /home/gw/software/seqkit stats -a -T -j "${task.cpus}" ${reads} > seqkit_stats.tsv
-    else
+    if ! command -v seqkit >/dev/null 2>&1; then
         printf 'seqkit executable not found\\n' >&2
         exit 127
     fi
+    seqkit stats -a -T -j "${task.cpus}" ${reads} > seqkit_stats.tsv
     """
 }
 
@@ -182,17 +137,14 @@ process KMER_COUNT {
     """
     set -euo pipefail
 
-    if command -v meryl >/dev/null 2>&1; then
-        MERYL_BIN="meryl"
-    elif [ -x /home/gw/software/canu/build/bin/meryl ]; then
-        MERYL_BIN="/home/gw/software/canu/build/bin/meryl"
-    else
+    if ! command -v meryl >/dev/null 2>&1; then
         printf 'meryl executable not found\\n' >&2
         exit 127
     fi
+    MERYL_BIN="\$(command -v meryl)"
 
     "\$MERYL_BIN" count \\
-        k="${kmerK}" \\
+        k="${params.kmer_k ?: 21}" \\
         threads="${task.cpus}" \\
         memory="${task.memory.toGiga() as int}" \\
         output read.meryl \\
@@ -220,9 +172,9 @@ process GENOMESCOPE_SUMMARY {
     """
     set -euo pipefail
 
-    PYTHONPATH="${pythonPath}" python -m hifi_agent.workflow_tools run-genomescope \\
+    python -m hifi_agent.workflow_tools run-genomescope \\
         --histogram "${histogram}" \\
-        --k "${kmerK}" \\
+        --k "${params.kmer_k ?: 21}" \\
         --output-dir genomescope \\
         --summary genomescope_summary.tsv
     """
@@ -246,13 +198,13 @@ process KMER_METRICS {
     """
     set -euo pipefail
 
-    PYTHONPATH="${pythonPath}" python -m hifi_agent.workflow_tools kmer-metrics \\
+    python -m hifi_agent.workflow_tools kmer-metrics \\
         --sample-id "${sample_id}" \\
         --histogram "${histogram}" \\
         --genomescope-summary "${genomescope_summary}" \\
-        --expected-genome-size "${expectedGenomeSize}" \\
-        --kmer-source "${kmerSource}" \\
-        --low-coverage-peak-threshold "${kmerLowCoveragePeakThreshold}" \\
+        --expected-genome-size "${params.expected_genome_size ?: ''}" \\
+        --kmer-source "${params.kmer_source ?: 'same_data_advisory'}" \\
+        --low-coverage-peak-threshold "${params.kmer_low_coverage_peak_threshold ?: 10.0}" \\
         --output kmer_metrics.json
     """
 }
@@ -275,29 +227,29 @@ process RAW_METRICS {
     """
     set -euo pipefail
 
-    PYTHONPATH="${pythonPath}" python -m hifi_agent.workflow_tools raw-metrics \\
+    python -m hifi_agent.workflow_tools raw-metrics \\
         --sample-id "${sample_id}" \\
         --seqkit-stats "${seqkit_stats}" \\
         --nanostats "${nanostats}" \\
         --kmer-metrics "${kmer_metrics}" \\
-        --expected-genome-size "${expectedGenomeSize}" \\
+        --expected-genome-size "${params.expected_genome_size ?: ''}" \\
         --output raw_metrics.json
     """
 }
 
-process HIFIASM_BASELINE {
-    tag "${sample_id}:${assemblyRunId}"
+process HIFIASM_ASSEMBLY {
+    tag "${sample_id}:${params.assembly_run_id ?: 'baseline'}"
     label 'assembly'
 
-    publishDir "${params.outdir}/02_assembly/${assemblyRunId}",
+    publishDir (params.assembly_publish_dir ?: "${params.outdir}/02_assembly/${params.assembly_run_id ?: 'baseline'}"),
         mode: params.publish_mode,
         overwrite: params.publish_overwrite
 
     input:
-    tuple val(sample_id), path(reads), path(raw_metrics), path(bin_reuse_manifest)
+    tuple val(sample_id), path(reads), path(raw_metrics)
 
     output:
-    tuple val(sample_id), path('metadata/assembly_manifest.json'), path("fasta/${assemblyRunId}.primary.fa"), emit: baseline
+    tuple val(sample_id), path('metadata/assembly_manifest.json'), path("fasta/${params.assembly_run_id ?: 'baseline'}.primary.fa"), emit: baseline
     path 'logs', emit: logs
     path 'gfa', emit: gfa
     path 'fasta', emit: fasta
@@ -308,54 +260,31 @@ process HIFIASM_BASELINE {
     """
     set -euo pipefail
 
-    PREFIX="${sample_id}.${assemblyRunId}"
+    PREFIX="${sample_id}.${params.assembly_run_id ?: 'baseline'}"
     mkdir -p logs gfa fasta bins metadata
 
-    if command -v hifiasm >/dev/null 2>&1; then
-        HIFIASM_BIN="hifiasm"
-    elif [ -x /home/gw/software/hifiasm/hifiasm ]; then
-        HIFIASM_BIN="/home/gw/software/hifiasm/hifiasm"
-    else
+    if ! command -v hifiasm >/dev/null 2>&1; then
         printf 'hifiasm executable not found\\n' >&2
         exit 127
     fi
+    HIFIASM_BIN="\$(command -v hifiasm)"
 
-    if command -v gfatools >/dev/null 2>&1; then
-        GFATOOLS_BIN="gfatools"
-    elif [ -x /home/gw/software/gfatools/gfatools ]; then
-        GFATOOLS_BIN="/home/gw/software/gfatools/gfatools"
-    else
+    if ! command -v gfatools >/dev/null 2>&1; then
         printf 'gfatools executable not found\\n' >&2
         exit 127
     fi
+    GFATOOLS_BIN="\$(command -v gfatools)"
 
     "\$HIFIASM_BIN" --version > metadata/hifiasm.version.txt
     "\$GFATOOLS_BIN" version > metadata/gfatools.version.txt 2>&1 || true
 
-    printf 'source_path\\tdestination\\tstatus\\n' > metadata/reused_bins.tsv
-    while IFS=\$'\\t' read -r bin expected_sha expected_bytes; do
-        [ "\$bin" != "path" ] || continue
-        [ -f "\$bin" ] || { printf 'Missing reuse candidate: %s\\n' "\$bin" >&2; exit 2; }
-        observed_sha=\$(sha256sum "\$bin" | awk '{print \$1}')
-        [ "\$observed_sha" = "\$expected_sha" ] || {
-            printf 'Checksum mismatch for reuse candidate: %s\\n' "\$bin" >&2
-            exit 2
-        }
-        source_name=\$(basename "\$bin")
-        destination_name="\${source_name/${sample_id}.baseline/\$PREFIX}"
-        cp "\$bin" "\$destination_name"
-        printf '%s\\t%s\\treused\\n' "\$bin" "\$destination_name" >> metadata/reused_bins.tsv
-    done < "${bin_reuse_manifest}"
-
     PARAMETER_ARGS=()
-    if [ "${assemblyRunId}" != "baseline" ]; then
-        PARAMETER_ARGS=(-l "${hifiasmPurgeLevel}" -s "${hifiasmPurgeSimilarity}")
-        if [ -n "${hifiasmHomCov}" ]; then
-            PARAMETER_ARGS+=(--hom-cov "${hifiasmHomCov}")
-        fi
-        if [ "${hifiasmDisablePostJoin}" = "true" ]; then
-            PARAMETER_ARGS+=(-u0)
-        fi
+    PARAMETER_ARGS=(-l "${params.hifiasm_purge_level == null ? 3 : params.hifiasm_purge_level}" -s "${params.hifiasm_purge_similarity == null ? 0.55 : params.hifiasm_purge_similarity}")
+    if [ -n "${params.hifiasm_hom_cov ?: ''}" ]; then
+        PARAMETER_ARGS+=(--hom-cov "${params.hifiasm_hom_cov ?: ''}")
+    fi
+    if [ "${params.hifiasm_disable_post_join == null ? false : params.hifiasm_disable_post_join}" = "true" ]; then
+        PARAMETER_ARGS+=(-u0)
     fi
 
     printf '%q ' "\$HIFIASM_BIN" -o "\$PREFIX" -t "${task.cpus}" "\${PARAMETER_ARGS[@]}" ${reads} > metadata/hifiasm_command.txt
@@ -389,28 +318,27 @@ process HIFIASM_BASELINE {
         fi
     }
 
-    convert_gfa "gfa/\${PREFIX}.bp.p_ctg.gfa" "fasta/${assemblyRunId}.primary.fa" "primary contig"
-    convert_gfa "gfa/\${PREFIX}.bp.hap1.p_ctg.gfa" "fasta/${assemblyRunId}.hap1.fa" "haplotype 1"
-    convert_gfa "gfa/\${PREFIX}.bp.hap2.p_ctg.gfa" "fasta/${assemblyRunId}.hap2.fa" "haplotype 2"
+    convert_gfa "gfa/\${PREFIX}.bp.p_ctg.gfa" "fasta/${params.assembly_run_id ?: 'baseline'}.primary.fa" "primary contig"
+    convert_gfa "gfa/\${PREFIX}.bp.hap1.p_ctg.gfa" "fasta/${params.assembly_run_id ?: 'baseline'}.hap1.fa" "haplotype 1"
+    convert_gfa "gfa/\${PREFIX}.bp.hap2.p_ctg.gfa" "fasta/${params.assembly_run_id ?: 'baseline'}.hap2.fa" "haplotype 2"
 
-    PYTHONPATH="${pythonPath}" python -m hifi_agent.workflow_tools hifiasm-manifest \\
+    python -m hifi_agent.workflow_tools hifiasm-manifest \\
         --sample-id "${sample_id}" \\
-        --run-id "${assemblyRunId}" \\
+        --run-id "${params.assembly_run_id ?: 'baseline'}" \\
         --prefix "\$PREFIX" \\
         --command-file metadata/hifiasm_command.txt \\
         --stdout logs/hifiasm.stdout \\
         --stderr logs/hifiasm.stderr \\
         --time-report logs/hifiasm.time.txt \\
-        --reused-bins-record metadata/reused_bins.tsv \\
         --output metadata/assembly_manifest.json
     """
 }
 
 process QUAST {
-    tag "${sample_id}:${assemblyRunId}"
+    tag "${sample_id}:${params.assembly_run_id ?: 'baseline'}"
     label 'post_qc'
 
-    publishDir "${params.outdir}/03_post_qc/${assemblyRunId}/quast",
+    publishDir "${params.post_qc_publish_dir ?: "${params.outdir}/03_post_qc/${params.assembly_run_id ?: 'baseline'}"}/quast",
         mode: params.publish_mode,
         overwrite: params.publish_overwrite
 
@@ -429,13 +357,7 @@ process QUAST {
     set -euo pipefail
     mkdir -p quast
 
-    if command -v quast.py >/dev/null 2>&1; then
-        QUAST_BIN="quast.py"
-    elif [ -x /home/gw/software/quast/quast.py ]; then
-        QUAST_BIN="/home/gw/software/quast/quast.py"
-    else
-        QUAST_BIN=""
-    fi
+    QUAST_BIN="\$(command -v quast.py || true)"
 
     MODE="reference_free"
     REFERENCE_ARGS=()
@@ -467,7 +389,7 @@ process QUAST {
         printf 'quast.py executable not found\n' > quast.stderr
     fi
 
-    PYTHONPATH="${pythonPath}" python -m hifi_agent.workflow_tools quast-metrics \
+    python -m hifi_agent.workflow_tools quast-metrics \
         --report quast/report.tsv \
         --status "\$STATUS" \
         --mode "\$MODE" \
@@ -477,10 +399,10 @@ process QUAST {
 }
 
 process BUSCO_POST_QC {
-    tag "${sample_id}:${assemblyRunId}"
+    tag "${sample_id}:${params.assembly_run_id ?: 'baseline'}"
     label 'post_qc'
 
-    publishDir "${params.outdir}/03_post_qc/${assemblyRunId}/busco",
+    publishDir "${params.post_qc_publish_dir ?: "${params.outdir}/03_post_qc/${params.assembly_run_id ?: 'baseline'}"}/busco",
         mode: params.publish_mode,
         overwrite: params.publish_overwrite
 
@@ -499,20 +421,21 @@ process BUSCO_POST_QC {
     set -euo pipefail
     mkdir -p busco
 
-    if command -v busco >/dev/null 2>&1; then
-        BUSCO_BIN="busco"
-    elif [ -x /home/gw/miniconda3/envs/evaluation/bin/busco ]; then
-        BUSCO_BIN="/home/gw/miniconda3/envs/evaluation/bin/busco"
-    else
-        BUSCO_BIN=""
-    fi
+    BUSCO_BIN="\$(command -v busco || true)"
 
     LINEAGE_ARGS=()
     OFFLINE_ARGS=()
+    DOWNLOAD_ARGS=()
+    REPORT_DOWNLOAD_ARGS=()
+    if [ -n "${busco_download_path_value}" ]; then
+        DOWNLOAD_ARGS=(--download_path "${busco_download_path_value}")
+        REPORT_DOWNLOAD_ARGS=(--download-path "${busco_download_path_value}")
+    fi
     if [ -n "${busco_lineage_value}" ]; then
         LINEAGE_ARGS=(-l "${busco_lineage_value}")
-        if [ -d "${busco_download_path_value}/${busco_lineage_value}" ] || \
-           [ -d "${busco_download_path_value}/lineages/${busco_lineage_value}" ]; then
+        if [ -n "${busco_download_path_value}" ] && \
+           { [ -d "${busco_download_path_value}/${busco_lineage_value}" ] || \
+             [ -d "${busco_download_path_value}/lineages/${busco_lineage_value}" ]; }; then
             OFFLINE_ARGS=(--offline)
         fi
     else
@@ -530,8 +453,8 @@ process BUSCO_POST_QC {
             -m genome \
             -c "${task.cpus}" \
             --out_path "\$PWD/busco" \
-            --download_path "${busco_download_path_value}" \
             --opt-out-run-stats \
+            "\${DOWNLOAD_ARGS[@]}" \
             "\${OFFLINE_ARGS[@]}" \
             "\${LINEAGE_ARGS[@]}" \
             > busco.stdout 2> busco.stderr
@@ -543,21 +466,21 @@ process BUSCO_POST_QC {
         printf 'BUSCO executable not found\n' > busco.stderr
     fi
 
-    PYTHONPATH="${pythonPath}" python -m hifi_agent.workflow_tools busco-metrics \
+    python -m hifi_agent.workflow_tools busco-metrics \
         --root busco \
         --status "\$STATUS" \
         --lineage "${busco_lineage_value}" \
-        --download-path "${busco_download_path_value}" \
+        "\${REPORT_DOWNLOAD_ARGS[@]}" \
         --version-file busco.version.txt \
         --output busco_metrics.json
     """
 }
 
 process MERQURY_POST_QC {
-    tag "${sample_id}:${assemblyRunId}"
+    tag "${sample_id}:${params.assembly_run_id ?: 'baseline'}"
     label 'post_qc'
 
-    publishDir "${params.outdir}/03_post_qc/${assemblyRunId}/merqury",
+    publishDir "${params.post_qc_publish_dir ?: "${params.outdir}/03_post_qc/${params.assembly_run_id ?: 'baseline'}"}/merqury",
         mode: params.publish_mode,
         overwrite: params.publish_overwrite
 
@@ -573,24 +496,14 @@ process MERQURY_POST_QC {
     set -euo pipefail
     mkdir -p merqury/toolbin
 
-    if command -v merqury.sh >/dev/null 2>&1; then
-        MERQURY_BIN="\$(command -v merqury.sh)"
-    elif [ -x /home/gw/software/merqury/merqury.sh ]; then
-        MERQURY_BIN="/home/gw/software/merqury/merqury.sh"
-    else
-        MERQURY_BIN=""
-    fi
-    if command -v meryl >/dev/null 2>&1; then
-        REAL_MERYL="\$(command -v meryl)"
-    elif [ -x /home/gw/software/canu/build/bin/meryl ]; then
-        REAL_MERYL="/home/gw/software/canu/build/bin/meryl"
-    else
-        REAL_MERYL=""
-    fi
+    MERQURY_BIN="\$(command -v merqury.sh || true)"
+    REAL_MERYL="\$(command -v meryl || true)"
 
     printf 'Merqury 1.3 (existing installation)\n' > merqury/merqury.version.txt
     STATUS=127
     if [ -n "\$MERQURY_BIN" ] && [ -n "\$REAL_MERYL" ]; then
+        MERQURY_SCRIPT="\$(readlink -f "\$MERQURY_BIN")"
+        MERQURY_ROOT="\$(dirname "\$MERQURY_SCRIPT")"
         printf '#!/usr/bin/env bash\nexec "%s" threads="%s" memory="%s" "\$@"\n' \
             "\$REAL_MERYL" "${task.cpus}" "${task.memory.toGiga() as int}" \
             > merqury/toolbin/meryl
@@ -599,8 +512,8 @@ process MERQURY_POST_QC {
         (
             cd merqury
             export PATH="\$PWD/toolbin:\$PATH"
-            export MERQURY="\$(dirname "\$MERQURY_BIN")"
-            "\$MERQURY_BIN" "../${meryl_db}" "../${primary_fasta}" baseline
+            export MERQURY="\$MERQURY_ROOT"
+            "\$MERQURY_SCRIPT" "../${meryl_db}" "../${primary_fasta}" baseline
         ) > merqury/merqury.stdout 2> merqury/merqury.stderr
         STATUS=\$?
         set -e
@@ -609,7 +522,7 @@ process MERQURY_POST_QC {
         printf 'Merqury or meryl executable not found\n' > merqury/merqury.stderr
     fi
 
-    PYTHONPATH="${pythonPath}" python -m hifi_agent.workflow_tools merqury-metrics \
+    python -m hifi_agent.workflow_tools merqury-metrics \
         --qv merqury/baseline.qv \
         --completeness merqury/baseline.completeness.stats \
         --status "\$STATUS" \
@@ -621,10 +534,10 @@ process MERQURY_POST_QC {
 }
 
 process MAPPING_POST_QC {
-    tag "${sample_id}:${assemblyRunId}"
+    tag "${sample_id}:${params.assembly_run_id ?: 'baseline'}"
     label 'post_qc'
 
-    publishDir "${params.outdir}/03_post_qc/${assemblyRunId}/mapping",
+    publishDir "${params.post_qc_publish_dir ?: "${params.outdir}/03_post_qc/${params.assembly_run_id ?: 'baseline'}"}/mapping",
         mode: params.publish_mode,
         overwrite: params.publish_overwrite
 
@@ -641,28 +554,13 @@ process MAPPING_POST_QC {
     mkdir -p mapping
     cp "${primary_fasta}" mapping/assembly.fa
 
-    if command -v minimap2 >/dev/null 2>&1; then
-        MINIMAP2_BIN="\$(command -v minimap2)"
-    elif [ -x /home/gw/software/minimap2/minimap2 ]; then
-        MINIMAP2_BIN="/home/gw/software/minimap2/minimap2"
-    else
-        MINIMAP2_BIN=""
-    fi
-    if command -v samtools >/dev/null 2>&1; then
-        SAMTOOLS_BIN="\$(command -v samtools)"
-    elif [ -x /home/gw/software/samtools/bin/samtools ]; then
-        SAMTOOLS_BIN="/home/gw/software/samtools/bin/samtools"
-    else
-        SAMTOOLS_BIN=""
-    fi
+    MINIMAP2_BIN="\$(command -v minimap2 || true)"
+    SAMTOOLS_BIN="\$(command -v samtools || true)"
     if command -v mosdepth >/dev/null 2>&1; then
         COVERAGE_BIN="\$(command -v mosdepth)"
         COVERAGE_MODE="mosdepth"
     elif command -v bedtools >/dev/null 2>&1; then
         COVERAGE_BIN="\$(command -v bedtools)"
-        COVERAGE_MODE="bedtools_samtools_bedcov"
-    elif [ -x /home/gw/software/bedtools2/bin/bedtools ]; then
-        COVERAGE_BIN="/home/gw/software/bedtools2/bin/bedtools"
         COVERAGE_MODE="bedtools_samtools_bedcov"
     else
         COVERAGE_BIN=""
@@ -679,12 +577,12 @@ process MAPPING_POST_QC {
     touch mapping/minimap2.version.txt mapping/samtools.version.txt mapping/coverage.version.txt
 
     set +e
-    PYTHONPATH="${pythonPath}" python -m hifi_agent.workflow_tools filter-hifi-reads \
+    python -m hifi_agent.workflow_tools filter-hifi-reads \
         --input ${reads} \
         --output mapping/filtered_reads.fastq.gz \
         --summary mapping/filter_summary.json \
-        --min-read-length "${mappingMinReadLength}" \
-        --min-mean-qscore "${mappingMinMeanQscore}" \
+        --min-read-length "${params.mapping_min_read_length ?: 1000}" \
+        --min-mean-qscore "${params.mapping_min_mean_qscore ?: 20.0}" \
         > mapping/filter.stdout 2> mapping/filter.stderr
     FILTER_STATUS=\$?
     set -e
@@ -730,7 +628,7 @@ process MAPPING_POST_QC {
     set -e
     touch mapping/flagstat.txt mapping/coverage_windows.tsv
 
-    PYTHONPATH="${pythonPath}" python -m hifi_agent.workflow_tools mapping-metrics \
+    python -m hifi_agent.workflow_tools mapping-metrics \
         --flagstat mapping/flagstat.txt \
         --windows mapping/coverage_windows.tsv \
         --status "\$STATUS" \
@@ -745,10 +643,10 @@ process MAPPING_POST_QC {
 }
 
 process ASSEMBLY_METRICS {
-    tag "${sample_id}:${assemblyRunId}"
+    tag "${sample_id}:${params.assembly_run_id ?: 'baseline'}"
     label 'small'
 
-    publishDir "${params.outdir}/03_post_qc/${assemblyRunId}",
+    publishDir (params.post_qc_publish_dir ?: "${params.outdir}/03_post_qc/${params.assembly_run_id ?: 'baseline'}"),
         mode: params.publish_mode,
         overwrite: params.publish_overwrite
 
@@ -761,8 +659,8 @@ process ASSEMBLY_METRICS {
     script:
     """
     set -euo pipefail
-    PYTHONPATH="${pythonPath}" python -m hifi_agent.workflow_tools assembly-metrics \
-        --run-id "${assemblyRunId}" \
+    python -m hifi_agent.workflow_tools assembly-metrics \
+        --run-id "${params.assembly_run_id ?: 'baseline'}" \
         --quast "${quast_metrics}" \
         --busco "${busco_metrics}" \
         --merqury "${merqury_metrics}" \
@@ -772,184 +670,72 @@ process ASSEMBLY_METRICS {
     """
 }
 
-process WRITE_RUN_MANIFEST {
-    tag "${sample_id}"
-    label 'small'
+workflow ASSEMBLY_ATTEMPT {
+    def sample_id_value = params.sample_id as String
+    def validation_receipt_value = params.validation_receipt ? params.validation_receipt as String : ''
+    def reads_manifest_value = params.reads_manifest
+    def reference_genome_value = params.reference_genome ? params.reference_genome as String : ''
+    def expected_genome_size_value = params.expected_genome_size ? params.expected_genome_size as String : ''
+    def busco_lineage_value = params.busco_lineage ? params.busco_lineage as String : ''
+    def busco_download_path_value = params.busco_download_path ? params.busco_download_path as String : ''
+    def busco_timeout_minutes_value = params.busco_timeout_minutes ?: 240
+    def kmer_source_value = params.kmer_source ?: 'same_data_advisory'
+    def coverage_window_size_value = params.coverage_window_size ?: 10000
 
-    publishDir "${params.outdir}/00_metadata",
-        mode: params.publish_mode,
-        overwrite: params.publish_overwrite
-
-    input:
-    tuple val(sample_id), path(metrics), path(raw_metrics)
-
-    output:
-    path 'run_manifest.json', emit: manifest
-
-    script:
-    """
-    set -euo pipefail
-
-    total_records=\$(awk 'NR > 1 { sum += \$3 } END { print sum + 0 }' "${metrics}")
-    total_bases=\$(awk 'NR > 1 { sum += \$4 } END { print sum + 0 }' "${metrics}")
-    file_count=\$(awk 'NR > 1 { count++ } END { print count + 0 }' "${metrics}")
-
-    printf '{\\n' > run_manifest.json
-    printf '  "sample_id": "%s",\\n' "${sample_id}" >> run_manifest.json
-    printf '  "workflow_stage": "phase3_minimal_nextflow",\\n' >> run_manifest.json
-    printf '  "workflow_entry": "workflow/main.nf",\\n' >> run_manifest.json
-    printf '  "file_count": %s,\\n' "\$file_count" >> run_manifest.json
-    printf '  "read_count": %s,\\n' "\$total_records" >> run_manifest.json
-    printf '  "total_bases": %s,\\n' "\$total_bases" >> run_manifest.json
-    printf '  "fastq_probe": "01_pre_qc/fastq_probe/fastq_probe.tsv",\\n' >> run_manifest.json
-    printf '  "raw_metrics": "01_pre_qc/raw_metrics.json"\\n' >> run_manifest.json
-    printf '}\\n' >> run_manifest.json
-    """
-}
-
-workflow POST_QC_ONLY {
-    if (!params.assembly_fasta || !params.assembly_manifest || !params.meryl_db) {
-        error "POST_QC_ONLY requires --assembly_fasta, --assembly_manifest, and --meryl_db"
+    if (!sample_id_value) {
+        error "Missing required parameter: --sample_id"
     }
-
-    baseline_ch = Channel.of(
-        tuple(sampleId, file(params.assembly_manifest), file(params.assembly_fasta))
-    )
-    quast_ch = baseline_ch.map { sample_id, assembly_manifest, primary_fasta ->
-        tuple(sample_id, assembly_manifest, primary_fasta, referenceGenome, expectedGenomeSize)
+    if (!(sample_id_value ==~ /^[A-Za-z0-9_-]+$/)) {
+        error "Invalid --sample_id '${sample_id_value}'. Use only letters, numbers, underscores, and hyphens."
     }
-    busco_ch = baseline_ch.map { sample_id, assembly_manifest, primary_fasta ->
-        tuple(
-            sample_id,
-            assembly_manifest,
-            primary_fasta,
-            buscoLineage,
-            buscoDownloadPath,
-            buscoTimeoutMinutes
-        )
+    if (!validation_receipt_value || !new File(validation_receipt_value).isFile()) {
+        error "Missing validated input receipt: --validation_receipt"
     }
-    QUAST(quast_ch)
-    BUSCO_POST_QC(busco_ch)
-
-    merqury_ch = Channel.of(
-        tuple(
-            sampleId,
-            file(params.assembly_manifest),
-            file(params.assembly_fasta),
-            file(params.meryl_db),
-            file(params.kmer_histogram ?: params.meryl_db),
-            kmerSource
-        )
-    )
-    MERQURY_POST_QC(merqury_ch)
-
-    mapping_reads_ch = Channel
-        .fromPath(readsManifest, checkIfExists: true)
-        .splitText()
-        .map { read -> read.trim() }
-        .filter { read -> read }
-        .map { read -> file(read) }
-        .collect()
-        .map { reads -> tuple(sampleId, reads) }
-    mapping_ch = baseline_ch
-        .join(mapping_reads_ch)
-        .map { sample_id, assembly_manifest, primary_fasta, reads ->
-            tuple(sample_id, assembly_manifest, primary_fasta, reads, coverageWindowSize)
-        }
-    MAPPING_POST_QC(mapping_ch)
-
-    combined_ch = QUAST.out.metrics
-        .join(BUSCO_POST_QC.out.metrics)
-        .join(MERQURY_POST_QC.out.metrics)
-        .join(MAPPING_POST_QC.out.metrics)
-        .map { sample_id, quast_metrics, busco_metrics, merqury_metrics, mapping_metrics ->
-            tuple(
-                sample_id,
-                quast_metrics,
-                busco_metrics,
-                merqury_metrics,
-                mapping_metrics,
-                expectedGenomeSize
-            )
-        }
-    ASSEMBLY_METRICS(combined_ch)
-}
-
-workflow HIFIASM_REUSE_ONLY {
-    if (!readsManifest || !params.raw_metrics || !binReuseManifest) {
-        error "HIFIASM_REUSE_ONLY requires --reads_manifest, --raw_metrics, and --bin_reuse_manifest"
+    if (!reads_manifest_value || !params.raw_metrics || !params.meryl_db) {
+        error "ASSEMBLY_ATTEMPT requires --reads_manifest, --raw_metrics, and --meryl_db"
     }
 
     assembly_reads_ch = Channel
-        .fromPath(readsManifest, checkIfExists: true)
+        .fromPath(reads_manifest_value, checkIfExists: true)
         .splitText()
         .map { read -> read.trim() }
         .filter { read -> read }
         .map { read -> file(read) }
         .collect()
-        .map { reads -> tuple(sampleId, reads) }
-    raw_metrics_ch = Channel.of(tuple(sampleId, file(params.raw_metrics)))
-    bin_reuse_ch = Channel.of(tuple(sampleId, file(binReuseManifest)))
+        .map { reads -> tuple(sample_id_value, reads) }
+    raw_metrics_ch = Channel.of(tuple(sample_id_value, file(params.raw_metrics)))
     assembly_input_ch = assembly_reads_ch
         .join(raw_metrics_ch)
-        .join(bin_reuse_ch)
-        .map { sample_id, reads, raw_metrics, bin_reuse_manifest ->
-            tuple(sample_id, reads, raw_metrics, bin_reuse_manifest)
+        .map { sample_id, reads, raw_metrics ->
+            tuple(sample_id, reads, raw_metrics)
         }
-    HIFIASM_BASELINE(assembly_input_ch)
-}
+    HIFIASM_ASSEMBLY(assembly_input_ch)
 
-workflow CANDIDATE_ONLY {
-    if (!readsManifest || !params.raw_metrics || !binReuseManifest || !params.meryl_db) {
-        error "CANDIDATE_ONLY requires --reads_manifest, --raw_metrics, --bin_reuse_manifest, and --meryl_db"
-    }
-    if (assemblyRunId == 'baseline') {
-        error "CANDIDATE_ONLY requires a non-baseline --assembly_run_id"
-    }
-
-    assembly_reads_ch = Channel
-        .fromPath(readsManifest, checkIfExists: true)
-        .splitText()
-        .map { read -> read.trim() }
-        .filter { read -> read }
-        .map { read -> file(read) }
-        .collect()
-        .map { reads -> tuple(sampleId, reads) }
-    raw_metrics_ch = Channel.of(tuple(sampleId, file(params.raw_metrics)))
-    bin_reuse_ch = Channel.of(tuple(sampleId, file(binReuseManifest)))
-    assembly_input_ch = assembly_reads_ch
-        .join(raw_metrics_ch)
-        .join(bin_reuse_ch)
-        .map { sample_id, reads, raw_metrics, bin_reuse_manifest ->
-            tuple(sample_id, reads, raw_metrics, bin_reuse_manifest)
-        }
-    HIFIASM_BASELINE(assembly_input_ch)
-
-    quast_ch = HIFIASM_BASELINE.out.baseline.map {
+    quast_ch = HIFIASM_ASSEMBLY.out.baseline.map {
         sample_id, assembly_manifest, primary_fasta ->
             tuple(
                 sample_id,
                 assembly_manifest,
                 primary_fasta,
-                referenceGenome,
-                expectedGenomeSize
+                reference_genome_value,
+                expected_genome_size_value
             )
     }
-    busco_ch = HIFIASM_BASELINE.out.baseline.map {
+    busco_ch = HIFIASM_ASSEMBLY.out.baseline.map {
         sample_id, assembly_manifest, primary_fasta ->
             tuple(
                 sample_id,
                 assembly_manifest,
                 primary_fasta,
-                buscoLineage,
-                buscoDownloadPath,
-                buscoTimeoutMinutes
+                busco_lineage_value,
+                busco_download_path_value,
+                busco_timeout_minutes_value
             )
     }
     QUAST(quast_ch)
     BUSCO_POST_QC(busco_ch)
 
-    merqury_ch = HIFIASM_BASELINE.out.baseline.map {
+    merqury_ch = HIFIASM_ASSEMBLY.out.baseline.map {
         sample_id, assembly_manifest, primary_fasta ->
             tuple(
                 sample_id,
@@ -957,15 +743,15 @@ workflow CANDIDATE_ONLY {
                 primary_fasta,
                 file(params.meryl_db),
                 file(params.kmer_histogram ?: params.meryl_db),
-                kmerSource
+                kmer_source_value
             )
     }
     MERQURY_POST_QC(merqury_ch)
 
-    mapping_ch = HIFIASM_BASELINE.out.baseline
+    mapping_ch = HIFIASM_ASSEMBLY.out.baseline
         .join(assembly_reads_ch)
         .map { sample_id, assembly_manifest, primary_fasta, reads ->
-            tuple(sample_id, assembly_manifest, primary_fasta, reads, coverageWindowSize)
+            tuple(sample_id, assembly_manifest, primary_fasta, reads, coverage_window_size_value)
         }
     MAPPING_POST_QC(mapping_ch)
 
@@ -980,43 +766,62 @@ workflow CANDIDATE_ONLY {
                 busco_metrics,
                 merqury_metrics,
                 mapping_metrics,
-                expectedGenomeSize
+                expected_genome_size_value
             )
         }
     ASSEMBLY_METRICS(combined_ch)
 }
 
 workflow {
-    if (readsManifest) {
-        reads_ch = Channel
-            .fromPath(readsManifest, checkIfExists: true)
-            .splitText()
-            .map { read -> read.trim() }
-            .filter { read -> read }
-            .map { read -> file(read) }
-            .collect()
-            .map { reads -> tuple(sampleId, reads) }
-    } else {
-        reads_ch = Channel
-            .fromPath(readsPattern, checkIfExists: true)
-            .collect()
-            .map { reads -> tuple(sampleId, reads) }
+    def sample_id_value = params.sample_id as String
+    def validation_receipt_value = params.validation_receipt ? params.validation_receipt as String : ''
+    def reads_pattern_value = params.reads
+    def reads_manifest_value = params.reads_manifest
+    def kmer_reads_manifest_value = params.kmer_reads_manifest ?: reads_manifest_value
+
+    if (!sample_id_value) {
+        error "Missing required parameter: --sample_id"
+    }
+    if (!(sample_id_value ==~ /^[A-Za-z0-9_-]+$/)) {
+        error "Invalid --sample_id '${sample_id_value}'. Use only letters, numbers, underscores, and hyphens."
+    }
+    if (!validation_receipt_value || !new File(validation_receipt_value).isFile()) {
+        error "Missing validated input receipt: --validation_receipt"
+    }
+    if (!reads_pattern_value && !reads_manifest_value) {
+        error "Missing required parameter: --reads or --reads_manifest"
     }
 
-    if (kmerReadsManifest) {
-        kmer_reads_ch = Channel
-            .fromPath(kmerReadsManifest, checkIfExists: true)
+    if (reads_manifest_value) {
+        reads_ch = Channel
+            .fromPath(reads_manifest_value, checkIfExists: true)
             .splitText()
             .map { read -> read.trim() }
             .filter { read -> read }
             .map { read -> file(read) }
             .collect()
-            .map { reads -> tuple(sampleId, reads) }
+            .map { reads -> tuple(sample_id_value, reads) }
+    } else {
+        reads_ch = Channel
+            .fromPath(reads_pattern_value, checkIfExists: true)
+            .collect()
+            .map { reads -> tuple(sample_id_value, reads) }
+    }
+
+    if (kmer_reads_manifest_value) {
+        kmer_reads_ch = Channel
+            .fromPath(kmer_reads_manifest_value, checkIfExists: true)
+            .splitText()
+            .map { read -> read.trim() }
+            .filter { read -> read }
+            .map { read -> file(read) }
+            .collect()
+            .map { reads -> tuple(sample_id_value, reads) }
     } else {
         kmer_reads_ch = Channel
-            .fromPath(readsPattern, checkIfExists: true)
+            .fromPath(reads_pattern_value, checkIfExists: true)
             .collect()
-            .map { reads -> tuple(sampleId, reads) }
+            .map { reads -> tuple(sample_id_value, reads) }
     }
 
     FASTQ_PROBE(reads_ch)
@@ -1034,116 +839,4 @@ workflow {
         }
     RAW_METRICS(pre_qc_ch)
 
-    if (runAssembly) {
-        if (!binReuseManifest || !new File(binReuseManifest).isFile()) {
-            error "Assembly requires --bin_reuse_manifest from the validated CLI"
-        }
-        if (readsManifest) {
-            assembly_reads_ch = Channel
-                .fromPath(readsManifest, checkIfExists: true)
-                .splitText()
-                .map { read -> read.trim() }
-                .filter { read -> read }
-                .map { read -> file(read) }
-                .collect()
-                .map { reads -> tuple(sampleId, reads) }
-        } else {
-            assembly_reads_ch = Channel
-                .fromPath(readsPattern, checkIfExists: true)
-                .collect()
-                .map { reads -> tuple(sampleId, reads) }
-        }
-
-        bin_reuse_ch = Channel.of(tuple(sampleId, file(binReuseManifest)))
-        assembly_input_ch = assembly_reads_ch
-            .join(RAW_METRICS.out.raw)
-            .join(bin_reuse_ch)
-            .map { sample_id, reads, raw_metrics, bin_reuse_manifest ->
-                tuple(sample_id, reads, raw_metrics, bin_reuse_manifest)
-        }
-        HIFIASM_BASELINE(assembly_input_ch)
-
-        if (runPostQc) {
-            quast_input_ch = HIFIASM_BASELINE.out.baseline
-                .map { sample_id, assembly_manifest, primary_fasta ->
-                    tuple(
-                        sample_id,
-                        assembly_manifest,
-                        primary_fasta,
-                        referenceGenome,
-                        expectedGenomeSize
-                    )
-                }
-            busco_input_ch = HIFIASM_BASELINE.out.baseline
-                .map { sample_id, assembly_manifest, primary_fasta ->
-                    tuple(
-                        sample_id,
-                        assembly_manifest,
-                        primary_fasta,
-                        buscoLineage,
-                        buscoDownloadPath,
-                        buscoTimeoutMinutes
-                    )
-                }
-            QUAST(quast_input_ch)
-            BUSCO_POST_QC(busco_input_ch)
-
-            merqury_input_ch = HIFIASM_BASELINE.out.baseline
-                .join(KMER_COUNT.out.histogram)
-                .map { sample_id, assembly_manifest, primary_fasta, meryl_db, histogram ->
-                    tuple(
-                        sample_id,
-                        assembly_manifest,
-                        primary_fasta,
-                        meryl_db,
-                        histogram,
-                        kmerSource
-                    )
-                }
-            MERQURY_POST_QC(merqury_input_ch)
-
-            if (readsManifest) {
-                mapping_reads_ch = Channel
-                    .fromPath(readsManifest, checkIfExists: true)
-                    .splitText()
-                    .map { read -> read.trim() }
-                    .filter { read -> read }
-                    .map { read -> file(read) }
-                    .collect()
-                    .map { reads -> tuple(sampleId, reads) }
-            } else {
-                mapping_reads_ch = Channel
-                    .fromPath(readsPattern, checkIfExists: true)
-                    .collect()
-                    .map { reads -> tuple(sampleId, reads) }
-            }
-            mapping_input_ch = HIFIASM_BASELINE.out.baseline
-                .join(mapping_reads_ch)
-                .map { sample_id, assembly_manifest, primary_fasta, reads ->
-                    tuple(sample_id, assembly_manifest, primary_fasta, reads, coverageWindowSize)
-                }
-            MAPPING_POST_QC(mapping_input_ch)
-
-            assembly_metrics_input_ch = QUAST.out.metrics
-                .join(BUSCO_POST_QC.out.metrics)
-                .join(MERQURY_POST_QC.out.metrics)
-                .join(MAPPING_POST_QC.out.metrics)
-                .map { sample_id, quast_metrics, busco_metrics, merqury_metrics, mapping_metrics ->
-                    tuple(
-                        sample_id,
-                        quast_metrics,
-                        busco_metrics,
-                        merqury_metrics,
-                        mapping_metrics,
-                        expectedGenomeSize
-                    )
-                }
-            ASSEMBLY_METRICS(assembly_metrics_input_ch)
-        }
-    }
-
-    manifest_input_ch = FASTQ_PROBE.out.metrics
-        .map { metrics -> tuple(sampleId, metrics) }
-        .join(RAW_METRICS.out.raw)
-    WRITE_RUN_MANIFEST(manifest_input_ch)
 }

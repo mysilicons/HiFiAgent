@@ -1,0 +1,55 @@
+{
+  "schema_version": "3.0",
+  "accepted_on": "2026-08-10",
+  "baseline_commit": "1786dcd3cd5b8ecae20b767a5a0c7328656bac6a",
+  "worktree_state": "DIRTY_STAGE0_STAGE4_IMPLEMENTATION_NOT_COMMITTED",
+  "scope": [0, 1, 2, 3, 4],
+  "status": "ACCEPTED",
+  "compatibility_policy": "NATIVE_V3_ONLY",
+  "portable_quality": {
+    "passed": 149,
+    "skipped": 0,
+    "failed": 0,
+    "coverage_percent": 88.34,
+    "coverage_gate_percent": 85,
+    "core_branch_coverage_percent": 93.33,
+    "core_branch_gate_percent": 90,
+    "ruff": "PASS",
+    "format": "PASS",
+    "mypy_strict": "PASS"
+  },
+  "stage3_gates": {
+    "common_executor": "PASS",
+    "six_piece_contract": "PASS",
+    "attempt_local_nextflow": "PASS",
+    "homologous_post_qc": "PASS",
+    "interruption_resume": "PASS",
+    "tool_retry_new_attempt": "PASS",
+    "inventory_marker_deep_verify": "PASS",
+    "old_execution_surfaces_removed": "PASS"
+  },
+  "stage4_gates": {
+    "typed_incumbent_context": "PASS",
+    "unified_proposal_provider": "PASS",
+    "governed_rag": "PASS",
+    "structured_llm_receipt": "PASS",
+    "llm_budget_resume_idempotency": "PASS",
+    "single_parameter_safety_arbiter": "PASS",
+    "incumbent_overlay_and_global_fingerprint": "PASS",
+    "proposal_lineage": "PASS"
+  },
+  "workflow_config_parse": "PASS",
+  "workflow_lint": {
+    "status": "PASS",
+    "files": 6,
+    "errors": 0,
+    "warnings": 0
+  },
+  "workflow_portable_execution": {
+    "status": "PASS",
+    "processes_succeeded": 2,
+    "processes_total": 2
+  },
+  "production_old_surface_matches": 0,
+  "release_scope_note": "Stages 5-10 and real-data release gates are not claimed complete."
+}

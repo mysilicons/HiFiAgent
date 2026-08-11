@@ -1,0 +1,22 @@
+{
+  "schema_id": "hifi-agent",
+  "provider": "portable-fixture",
+  "model": "recorded-structured-production",
+  "responses": [
+    {
+      "round_index": 1,
+      "output": {"proposals": []},
+      "metadata": {"fixture_receipt": "round-1"}
+    },
+    {
+      "round_index": 2,
+      "output": {"proposals": []},
+      "metadata": {"fixture_receipt": "round-2"}
+    },
+    {
+      "round_index": 3,
+      "output": {"proposals": []},
+      "metadata": {"fixture_receipt": "round-3"}
+    }
+  ]
+}

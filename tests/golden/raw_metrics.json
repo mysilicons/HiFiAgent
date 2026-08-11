@@ -12,6 +12,7 @@
   "read_count": 2,
   "read_n50": 60,
   "sample_id": "golden_sample",
+  "schema_id": "hifi-agent",
   "tool_outputs": {
     "kmer_metrics": "kmer_metrics.json",
     "nanostats": "NanoStats.txt",

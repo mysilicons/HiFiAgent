@@ -39,7 +39,7 @@ jobs:
         run: pytest --cov --cov-report=term-missing --cov-fail-under=85
 
       - name: Portable README demo
-        run: hifi-agent demo-v2 /tmp/hifi-agent-v2-demo
+        run: python scripts/run_portable_demo.py --workspace /tmp/hifi-agent-portable --scenario three-rounds
 
   nextflow-resume:
     runs-on: ubuntu-latest

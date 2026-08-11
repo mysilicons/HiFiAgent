@@ -1,7 +1,5 @@
 """Typed exceptions for predictable CLI and workflow failures."""
 
-from pathlib import Path
-
 from hifi_agent.constants import ExitCode
 
 
@@ -9,17 +7,6 @@ class HiFiAgentError(Exception):
     """Base class for expected HiFi Agent failures."""
 
     exit_code: ExitCode = ExitCode.INTERNAL_ERROR
-
-
-class NotImplementedCommandError(HiFiAgentError):
-    """Raised by CLI commands that are registered before their workflow exists."""
-
-    exit_code = ExitCode.NOT_IMPLEMENTED
-
-    def __init__(self, command: str, target: Path) -> None:
-        self.command = command
-        self.target = target
-        super().__init__(f"`hifi-agent {command}` is not implemented yet for {target}.")
 
 
 class InputValidationError(HiFiAgentError):
@@ -43,7 +30,7 @@ class RuleConfigurationError(HiFiAgentError):
 class RuleEvaluationError(HiFiAgentError):
     """Raised when a rule decision cannot be produced from supplied run artifacts."""
 
-    exit_code = ExitCode.INSUFFICIENT_EVIDENCE
+    exit_code = ExitCode.ACTION_REQUIRED
 
 
 class AgentStateError(HiFiAgentError):
@@ -59,10 +46,16 @@ class IllegalStateTransitionError(AgentStateError):
 class LLMProviderError(HiFiAgentError):
     """Raised when the optional LLM provider cannot return a usable response."""
 
-    exit_code = ExitCode.INSUFFICIENT_EVIDENCE
+    exit_code = ExitCode.REQUIRED_EXTERNAL_SERVICE_FAILED
 
 
 class LLMSafetyError(HiFiAgentError):
     """Raised when structured LLM output violates deterministic safety constraints."""
 
-    exit_code = ExitCode.INSUFFICIENT_EVIDENCE
+    exit_code = ExitCode.ACTION_REQUIRED
+
+
+class InterruptedExecutionError(HiFiAgentError):
+    """Raised when an attempt may be resumed in the same workspace."""
+
+    exit_code = ExitCode.TOOL_EXECUTION_FAILED

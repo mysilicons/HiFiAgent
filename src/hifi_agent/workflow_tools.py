@@ -80,7 +80,6 @@ def main() -> None:
     hifiasm_manifest.add_argument("--stdout", type=Path, required=True)
     hifiasm_manifest.add_argument("--stderr", type=Path, required=True)
     hifiasm_manifest.add_argument("--time-report", type=Path, required=True)
-    hifiasm_manifest.add_argument("--reused-bins-record", type=Path, required=True)
     hifiasm_manifest.add_argument("--output", type=Path, required=True)
     hifiasm_manifest.set_defaults(func=_hifiasm_manifest)
 
@@ -96,7 +95,7 @@ def main() -> None:
     busco_metrics.add_argument("--root", type=Path, required=True)
     busco_metrics.add_argument("--status", type=int, required=True)
     busco_metrics.add_argument("--lineage", required=True)
-    busco_metrics.add_argument("--download-path", type=Path, required=True)
+    busco_metrics.add_argument("--download-path", type=Path)
     busco_metrics.add_argument("--version-file", type=Path, required=True)
     busco_metrics.add_argument("--output", type=Path, required=True)
     busco_metrics.set_defaults(func=_busco_metrics)
@@ -137,9 +136,9 @@ def main() -> None:
 
 
 def _run_genomescope(args: argparse.Namespace) -> None:
-    genomescope = shutil.which("genomescope.R")
-    if genomescope is None and Path("/home/gw/software/genomescope2.0/genomescope.R").is_file():
-        genomescope = "/home/gw/software/genomescope2.0/genomescope.R"
+    genomescope = shutil.which("genomescope2")
+    fallback_r_script = shutil.which("genomescope.R")
+    genomescope = genomescope or fallback_r_script
     if genomescope is None:
         _write_key_value_table(
             args.summary,
@@ -154,16 +153,18 @@ def _run_genomescope(args: argparse.Namespace) -> None:
         return
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    command = [
-        "Rscript",
-        genomescope,
-        "-i",
-        str(args.histogram),
-        "-o",
-        str(args.output_dir),
-        "-k",
-        str(args.k),
-    ]
+    command = [] if genomescope != fallback_r_script else ["Rscript"]
+    command.extend(
+        [
+            genomescope,
+            "-i",
+            str(args.histogram),
+            "-o",
+            str(args.output_dir),
+            "-k",
+            str(args.k),
+        ]
+    )
     completed = subprocess.run(command, text=True, capture_output=True, check=False)
     (args.output_dir / "genomescope.stdout").write_text(completed.stdout)
     (args.output_dir / "genomescope.stderr").write_text(completed.stderr)
@@ -373,8 +374,6 @@ def _hifiasm_manifest(args: argparse.Namespace) -> None:
         "gfa_outputs": _relative_files(args.output.parent, "gfa", "*.gfa"),
         "fasta_outputs": _relative_files(args.output.parent, "fasta", "*.fa"),
         "bin_outputs": _relative_files(args.output.parent, "bins", "*.bin"),
-        "reused_bin_count": _count_reused_bins(args.reused_bins_record),
-        "reused_bins_record": str(args.reused_bins_record),
         "warnings": list(log_summary.warnings),
     }
     _write_json(args.output, data)
@@ -407,7 +406,11 @@ def _busco_metrics(args: argparse.Namespace) -> None:
     success = args.status == 0 and parsed["complete"] is not None
     limitations = [] if args.lineage else ["BUSCO_LINEAGE_AUTO_RECOMMENDED"]
     actual_lineage = infer_busco_lineage(summary) or (args.lineage if args.lineage else None)
-    dataset = parse_busco_dataset_metadata(args.download_path, actual_lineage)
+    dataset = (
+        parse_busco_dataset_metadata(args.download_path, actual_lineage)
+        if args.download_path is not None
+        else None
+    )
     _write_json(
         args.output,
         {
@@ -601,16 +604,6 @@ def _relative_files(base_dir: Path, subdir: str, pattern: str) -> list[str]:
     return [str(path.relative_to(base_dir.parent)) for path in sorted(root.glob(pattern))]
 
 
-def _count_reused_bins(path: Path) -> int:
-    if not path.is_file():
-        return 0
-    return sum(
-        1
-        for line in path.read_text(errors="replace").splitlines()[1:]
-        if line.rstrip().endswith("\treused")
-    )
-
-
 def _write_key_value_table(path: Path, rows: Mapping[str, object]) -> None:
     with path.open("w") as handle:
         handle.write("key\tvalue\n")
@@ -687,8 +680,9 @@ def _read_json(path: Path) -> dict[str, object]:
 
 
 def _write_json(path: Path, data: dict[str, object]) -> None:
+    payload = {"schema_id": "hifi-agent", **data}
     with path.open("w") as handle:
-        json.dump(data, handle, indent=2, sort_keys=True)
+        json.dump(payload, handle, indent=2, sort_keys=True)
         handle.write("\n")
 
 

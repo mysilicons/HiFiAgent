@@ -1,9 +1,9 @@
 {
-  "schema_version": "2.0",
-  "catalog_version": "2.0.0",
-  "catalog_sha256": "2938473a7303321f2a288195809d6f108b8dd561050bf68f2565c2055a22a211",
+  "schema_id": "hifi-agent",
+  "catalog_id": "production-knowledge",
+  "catalog_sha256": "1e65a60f7ed07a881f90b4d26b860003a053457ddeab94cf5a9125afe41ddc12",
   "target_hifiasm_version": "0.25.0-r726",
-  "built_at": "2026-07-15T00:00:00Z",
+  "built_at": "2026-08-10T03:57:48.477244Z",
   "source_ids": [
     "hifiasm_docs_index",
     "hifiasm_faq",
@@ -38,7 +38,7 @@
     "merqury_paper": "3b0b49041d72854d77a916408631a67b1ef12a772c9478b049a46e4d923c08f5",
     "genomescope_readme": "6443344b28913ac9257425a1acaaae6e13d5d6c510d66dd372f2275b23d5daa7",
     "genomescope_paper": "e19ce422c03e1fbd1e0cda5207e3f81620f693766a48085b26ac591c427a3d57",
-    "hifi_agent_rules": "9294bcf03647a676e0f9a8de1efe0de00ff67ddffbde731fb46ebc0e8da37659"
+    "hifi_agent_rules": "09214d1c87aea8f21fbb9a50c0ed99272a5091f10c3446f5bbc5530d0190bc82"
   },
   "parameter_evidence": {
     "purge_level": [

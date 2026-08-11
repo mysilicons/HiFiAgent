@@ -1,33 +1,37 @@
+schema_id: "hifi-agent"
 sample_id: Candida_albicans
+read_technology: pacbio_hifi
 hifi_reads:
-  - ../Candida_albicans/Candida_albicans_HIFI.fastq
-outdir: ../results/Candida_albicans_phase2
+  - ../Data/Candida_albicans/Candida_albicans_HiFi.fastq
+outdir: ../results/Candida_albicans
 species_name: Candida albicans
 expected_genome_size: 14500000
 ploidy: 2
 inbred: null
 busco_lineage: saccharomycetes_odb12
 kmer_reads: null
-reference_genome: ../Candida_albicans/Candida_albicans_gnome.fasta
+reference_genome: ../Data/Candida_albicans/Candida_albicans_gnome.fasta
 resources:
   max_threads: 480
   max_memory_gb: 960
-agent:
-  max_retry_rounds: 1
-  max_candidates_per_round: 2
-  max_tool_retries: 1
-  max_cpu_hours: 10000
-  max_walltime_hours: 168
-  objective: balanced
 optimization:
   enabled: true
   max_rounds: 3
   max_candidates_per_round: 1
+  max_parameter_changes_per_candidate: 1
   plateau_rounds: 1
   decision_mode: rules_only
   require_llm: false
   confirm_risk_level: medium_high
   retain_all_attempts: true
+execution_budget:
+  max_total_assemblies: 4
+  max_tool_retries: 1
+  max_cpu_hours: 10000
+  max_walltime_hours: 168
+  min_free_disk_gib: 100
+  max_llm_calls_per_round: 1
+  max_total_llm_calls: 3
 kmer:
   k: 21
   low_coverage_peak_threshold: 10.0

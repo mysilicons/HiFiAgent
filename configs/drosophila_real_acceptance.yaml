@@ -1,0 +1,46 @@
+schema_id: "hifi-agent"
+sample_id: Drosophila_melanogaster
+read_technology: pacbio_hifi
+input_root_env: HIFI_AGENT_DATA_ROOT
+hifi_reads:
+  - Drosophila_melanogaster/Drosophila_melanogaster_HiFi.fastq
+outdir: ../results/Drosophila_melanogaster_acceptance_run3
+species_name: Drosophila melanogaster
+expected_genome_size: 180000000
+ploidy: 2
+inbred: null
+busco_lineage: diptera_odb12
+kmer_reads: null
+reference_genome: null
+resources:
+  max_threads: 128
+  max_memory_gb: 960
+optimization:
+  enabled: true
+  max_rounds: 1
+  max_candidates_per_round: 1
+  minimum_candidate_runs: 1
+  max_parameter_changes_per_candidate: 1
+  plateau_rounds: 1
+  decision_mode: rules_only
+  require_llm: false
+  confirm_risk_level: medium_high
+  retain_all_attempts: true
+execution_budget:
+  max_total_assemblies: 3
+  max_tool_retries: 1
+  max_cpu_hours: 20000
+  max_walltime_hours: 336
+  min_free_disk_gib: 1000
+  max_llm_calls_per_round: 0
+  max_total_llm_calls: 0
+tools:
+  busco_lineage_dir: ../results/busco_downloads
+  coverage_backend: bedtools
+kmer:
+  k: 21
+  low_coverage_peak_threshold: 10.0
+mapping_qc:
+  min_read_length: 1000
+  min_mean_qscore: 20.0
+  coverage_window_size: 10000

@@ -1,0 +1,17 @@
+Loading required package: argparse
+Loading required package: ggplot2
+Loading required package: scales
+[1] "x_max: 315"
+[1] "y_max: 2842787.2"
+[1] "## Line graph"
+Fontconfig warning: using without calling FcInit()
+[1] "## Area under the curve filled"
+[1] "## Stacked"
+Warning messages:
+1: The `size` argument of `element_rect()` is deprecated as of ggplot2 3.4.0.
+ℹ Please use the `linewidth` argument instead.
+2: A numeric `legend.position` argument in `theme()` was deprecated in ggplot2
+3.5.0.
+ℹ Please use the `legend.position.inside` argument of `theme()` instead.
+3: Using `size` aesthetic for lines was deprecated in ggplot2 3.4.0.
+ℹ Please use `linewidth` instead.

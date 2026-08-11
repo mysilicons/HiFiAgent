@@ -1,8 +1,24 @@
 import ast
+import json
+import re
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = PROJECT_ROOT / "src" / "hifi_agent"
+CODE_ROOTS = (
+    PROJECT_ROOT / "src",
+    PROJECT_ROOT / "tests",
+    PROJECT_ROOT / "scripts",
+    PROJECT_ROOT / "workflow",
+    PROJECT_ROOT / "configs",
+    PROJECT_ROOT / "examples",
+    PROJECT_ROOT / ".github",
+)
+CODE_SUFFIXES = {".config", ".j2", ".json", ".nf", ".py", ".sh", ".toml", ".yaml", ".yml"}
+GENERATION_MARKER = re.compile(r"(?i)(?<![A-Za-z0-9])v[123](?![A-Za-z0-9])")
+VERSIONED_CONTRACT_KEYS = tuple(
+    f"{prefix}_{'version'}" for prefix in ("schema", "policy", "catalog", "parser")
+)
 
 
 def _public_functions(tree: ast.AST) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
@@ -54,3 +70,35 @@ def test_source_has_no_builtin_print_debug_calls() -> None:
             ):
                 failures.append(f"{path.relative_to(PROJECT_ROOT)}:{node.lineno}")
     assert failures == []
+
+
+def test_code_surface_has_no_generation_markers() -> None:
+    """Keep the production implementation free of generation-specific names and contracts."""
+    failures: list[str] = []
+    paths = [
+        path
+        for root in CODE_ROOTS
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix in CODE_SUFFIXES
+    ]
+    paths.extend((PROJECT_ROOT / "pyproject.toml", PROJECT_ROOT / "environment.yml"))
+    for path in sorted(set(paths)):
+        relative = path.relative_to(PROJECT_ROOT)
+        content = path.read_text(errors="replace")
+        if GENERATION_MARKER.search(str(relative)):
+            failures.append(f"generation marker in path: {relative}")
+        if GENERATION_MARKER.search(content):
+            failures.append(f"generation marker in content: {relative}")
+        for key in VERSIONED_CONTRACT_KEYS:
+            if key in content:
+                failures.append(f"versioned contract key `{key}` in {relative}")
+    assert failures == []
+
+
+def test_knowledge_contract_uses_neutral_identifiers() -> None:
+    """Check generated knowledge metadata without scanning quoted third-party publications."""
+    for relative in ("knowledge/index.json", "knowledge/index_manifest.json"):
+        payload = json.loads((PROJECT_ROOT / relative).read_text())
+        assert payload["schema_id"] == "hifi-agent"
+        assert payload["catalog_id"] == "production-knowledge"
+        assert not set(VERSIONED_CONTRACT_KEYS).intersection(payload)

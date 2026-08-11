@@ -1,18 +1,21 @@
 """Project-wide constants."""
 
 from enum import IntEnum
+from importlib.metadata import PackageNotFoundError, version
 
 APP_NAME = "hifi-agent"
-__version__ = "2.0.0"
+try:
+    __version__ = version(APP_NAME)
+except PackageNotFoundError:
+    __version__ = "unknown"
 
 
 class ExitCode(IntEnum):
-    """Process exit codes used by the HiFi Agent CLI."""
+    """Process exit codes documented by the public CLI contract."""
 
     OK = 0
-    USAGE_ERROR = 2
-    NOT_IMPLEMENTED = 10
-    INPUT_VALIDATION_FAILED = 20
-    TOOL_EXECUTION_FAILED = 30
-    INSUFFICIENT_EVIDENCE = 40
-    INTERNAL_ERROR = 70
+    INPUT_VALIDATION_FAILED = 2
+    ACTION_REQUIRED = 3
+    TOOL_EXECUTION_FAILED = 4
+    REQUIRED_EXTERNAL_SERVICE_FAILED = 5
+    INTERNAL_ERROR = 4

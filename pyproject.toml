@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hifi-agent"
-version = "2.0.0"
-description = "Constrained PacBio HiFi genome assembly assistant."
+version = "3.0.0"
+description = "Native constrained PacBio HiFi genome assembly assistant."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
@@ -37,41 +37,25 @@ hifi-agent = "hifi_agent.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"hifi_agent.reporting" = ["templates/*.j2"]
 "hifi_agent.data" = ["comparison_policy.yaml"]
 
 [tool.pytest.ini_options]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+  "real_acceptance: release-only tests against real biological data and live services",
+]
 
 [tool.coverage.run]
-source = [
-  "hifi_agent.agent",
-  "hifi_agent.benchmarking",
-  "hifi_agent.config",
-  "hifi_agent.executors.candidate",
-  "hifi_agent.executors.hifiasm_contract",
-  "hifi_agent.optimization.comparator",
-  "hifi_agent.optimization.evidence",
-  "hifi_agent.optimization.loop",
-  "hifi_agent.optimization.loop_models",
-  "hifi_agent.optimization.policy",
-  "hifi_agent.optimization.round_models",
-  "hifi_agent.optimization.rounds",
-  "hifi_agent.orchestration",
-  "hifi_agent.parsers",
-  "hifi_agent.qc",
-  "hifi_agent.rag",
-  "hifi_agent.reporting.v2",
-  "hifi_agent.reporting.v2_models",
-  "hifi_agent.rules",
-]
+source = ["hifi_agent"]
+omit = ["*/fixture-bin/*"]
 
 [tool.coverage.report]
 fail_under = 85
 show_missing = true
 skip_covered = true
+omit = ["*/fixture-bin/*"]
 
 [tool.ruff]
 line-length = 100

@@ -11,7 +11,7 @@ ruff check .
 ruff format --check .
 mypy
 pytest --cov --cov-fail-under=85
-hifi-agent demo-v2 /tmp/hifi-agent-v2-demo
+python scripts/run_portable_demo.py --workspace /tmp/hifi-agent-portable --scenario three-rounds
 ```
 
 Do not commit FASTQ/BAM/CRAM, assembly databases, BUSCO downloads, meryl databases, credentials,

@@ -1,419 +1,380 @@
-"""Nextflow execution wrapper for validated workflow runs."""
+"""Production Nextflow runner for the common assembly-attempt port."""
 
 from __future__ import annotations
 
-import hashlib
-import os
-import shutil
+import json
+import shlex
+import signal
 import subprocess
-from dataclasses import dataclass
+import time
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
-import yaml
-
-from hifi_agent.agent.models import AssemblyConfig
 from hifi_agent.config import verify_recorded_input_checksums, verify_validation_receipt
-from hifi_agent.exceptions import ToolExecutionError
-from hifi_agent.executors.hifiasm_contract import write_hifiasm_contract_artifacts
+from hifi_agent.exceptions import InterruptedExecutionError, ToolExecutionError
+from hifi_agent.executors.models import (
+    ArtifactInventory,
+    ArtifactInventoryEntry,
+    AssemblyInputManifest,
+    InputArtifact,
+    WorkflowInvocation,
+    WorkflowResult,
+)
+from hifi_agent.orchestration.manifests import ResourceUsage
+from hifi_agent.orchestration.runtime_models import sha256_file
 from hifi_agent.schemas.sample import SampleConfig
+from hifi_agent.tool_resolution import declared_subprocess_environment, resolve_configured_tool
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW_ENTRY = PROJECT_ROOT / "workflow" / "main.nf"
-WORKFLOW_CONFIG = PROJECT_ROOT / "workflow" / "nextflow.config"
-LOCAL_JAVA_HOME = Path("/home/gw/software/jdk21")
-LOCAL_JAVA_CMD = LOCAL_JAVA_HOME / "bin" / "java"
+WORKFLOW_ENTRY = PROJECT_ROOT / "workflow/main.nf"
+WORKFLOW_CONFIG = PROJECT_ROOT / "workflow/nextflow.config"
+CommandRunner = Callable[[list[str], Path, dict[str, str]], None]
 
 
-@dataclass(frozen=True)
-class NextflowRunResult:
-    """Metadata for a submitted Nextflow workflow run."""
-
-    command: tuple[str, ...]
-    outdir: Path
-    reads_manifest: Path
-
-
-def run_phase3_workflow(config: SampleConfig, *, resume: bool = False) -> NextflowRunResult:
-    """Run the validated Nextflow workflow through assembly and post-QC."""
-    nextflow = _find_nextflow()
-    reads_manifest = _write_path_manifest(
-        config.outdir / "00_metadata" / "hifi_reads.list", config.hifi_reads
-    )
-    kmer_paths = config.kmer_reads or config.hifi_reads
-    kmer_reads_manifest = _write_path_manifest(
-        config.outdir / "00_metadata" / "kmer_reads.list", kmer_paths
-    )
-    kmer_source = "independent_high_confidence" if config.kmer_reads else "same_data_advisory"
-    validation_receipt = config.outdir / "00_metadata" / "validation_receipt.json"
-    verify_validation_receipt(config, validation_receipt)
-    bin_reuse_manifest = _write_hifiasm_bin_reuse_manifest(
-        config.outdir / "00_metadata" / "hifiasm_bin_reuse_candidates.tsv",
-        config.outdir / "02_assembly" / "baseline" / "bins",
-        f"{config.sample_id}.baseline",
-    )
-
+def run_pre_qc_workflow(
+    sample: SampleConfig,
+    *,
+    resume: bool = False,
+    command_runner: CommandRunner | None = None,
+) -> AssemblyInputManifest:
+    """Materialize run-level pre-QC and return a checksum-bound assembly input manifest."""
+    run_dir = sample.outdir.resolve()
+    inventory_path = run_dir / "01_pre_qc/artifacts_manifest.json"
+    if resume and inventory_path.is_file():
+        _verify_pre_qc_inventory(run_dir, inventory_path)
+        return assembly_inputs_from_run(run_dir)
+    metadata = run_dir / "00_metadata"
+    reads_manifest = metadata / "hifi_reads.list"
+    kmer_manifest = metadata / "kmer_reads.list"
+    _write_or_verify_lines(reads_manifest, sample.hifi_reads)
+    _write_or_verify_lines(kmer_manifest, sample.kmer_reads or sample.hifi_reads)
+    validation_receipt = metadata / "validation_receipt.json"
+    verify_validation_receipt(sample, validation_receipt)
+    nextflow = resolve_configured_tool("nextflow", "nextflow", sample)
+    if nextflow is None:
+        raise ToolExecutionError("Nextflow executable was not resolved by current preflight")
+    pre_qc_root = run_dir / "01_pre_qc"
+    pre_qc_root.mkdir(parents=True, exist_ok=True)
+    work_root = pre_qc_root / "work"
     command = [
-        nextflow,
+        str(nextflow),
         "run",
         str(WORKFLOW_ENTRY),
         "-c",
         str(WORKFLOW_CONFIG),
         "-profile",
         "local",
+        "-work-dir",
+        str(work_root),
     ]
     if resume:
         command.append("-resume")
-
     command.extend(
         [
             "--sample_id",
-            config.sample_id,
+            sample.sample_id,
             "--reads_manifest",
             str(reads_manifest),
-            "--outdir",
-            str(config.outdir),
-            "--validation_receipt",
-            str(validation_receipt),
-            "--bin_reuse_manifest",
-            str(bin_reuse_manifest),
-            "--kmer_k",
-            str(config.kmer.k),
-            "--kmer_low_coverage_peak_threshold",
-            str(config.kmer.low_coverage_peak_threshold),
             "--kmer_reads_manifest",
-            str(kmer_reads_manifest),
+            str(kmer_manifest),
             "--kmer_source",
-            kmer_source,
-            "--mapping_min_read_length",
-            str(config.mapping_qc.min_read_length),
-            "--mapping_min_mean_qscore",
-            str(config.mapping_qc.min_mean_qscore),
-            "--coverage_window_size",
-            str(config.mapping_qc.coverage_window_size),
-            "--max_threads",
-            str(config.resources.max_threads),
-            "--max_memory_gb",
-            str(config.resources.max_memory_gb),
-        ]
-    )
-    _append_optional_nextflow_param(
-        command,
-        "--expected_genome_size",
-        config.expected_genome_size,
-    )
-    _append_optional_nextflow_param(command, "--reference_genome", config.reference_genome)
-    _append_optional_nextflow_param(command, "--busco_lineage", config.busco_lineage)
-
-    try:
-        subprocess.run(command, cwd=PROJECT_ROOT, env=_nextflow_environment(), check=True)
-    except subprocess.CalledProcessError as exc:
-        raise ToolExecutionError(
-            f"Nextflow workflow failed with exit code {exc.returncode}: {' '.join(command)}"
-        ) from exc
-
-    return NextflowRunResult(
-        command=tuple(command),
-        outdir=config.outdir,
-        reads_manifest=reads_manifest,
-    )
-
-
-def run_post_qc_workflow(run_dir: Path, *, resume: bool = True) -> NextflowRunResult:
-    """Evaluate an existing baseline assembly without rerunning pre-QC or hifiasm."""
-    resolved_config = run_dir / "00_metadata" / "resolved_config.yaml"
-    reads_manifest = run_dir / "00_metadata" / "hifi_reads.list"
-    assembly_fasta = run_dir / "02_assembly" / "baseline" / "fasta" / "baseline.primary.fa"
-    assembly_manifest = run_dir / "02_assembly" / "baseline" / "metadata" / "assembly_manifest.json"
-    meryl_db = run_dir / "01_pre_qc" / "kmer" / "read.meryl"
-    kmer_histogram = run_dir / "01_pre_qc" / "kmer" / "kmer_histogram.tsv"
-    validation_receipt = run_dir / "00_metadata" / "validation_receipt.json"
-    required = (
-        resolved_config,
-        validation_receipt,
-        reads_manifest,
-        assembly_fasta,
-        assembly_manifest,
-        meryl_db,
-    )
-    missing = [str(path) for path in required if not path.exists()]
-    if missing:
-        raise ToolExecutionError(f"Post-QC input(s) missing: {', '.join(missing)}")
-
-    raw_config = yaml.safe_load(resolved_config.read_text())
-    if not isinstance(raw_config, dict):
-        raise ToolExecutionError(f"Resolved config is not a YAML mapping: {resolved_config}")
-    config = SampleConfig.model_validate(raw_config)
-    verify_validation_receipt(config, validation_receipt)
-    verify_recorded_input_checksums(run_dir / "00_metadata" / "input_checksums.tsv")
-    nextflow = _find_nextflow()
-    kmer_source = "independent_high_confidence" if config.kmer_reads else "same_data_advisory"
-    command = [
-        nextflow,
-        "run",
-        str(WORKFLOW_ENTRY),
-        "-c",
-        str(WORKFLOW_CONFIG),
-        "-profile",
-        "local",
-        "-entry",
-        "POST_QC_ONLY",
-    ]
-    if resume:
-        command.append("-resume")
-    command.extend(
-        [
-            "--sample_id",
-            config.sample_id,
-            "--reads_manifest",
-            str(reads_manifest),
-            "--kmer_source",
-            kmer_source,
+            "independent_high_confidence" if sample.kmer_reads else "same_data_advisory",
             "--outdir",
             str(run_dir),
             "--validation_receipt",
             str(validation_receipt),
-            "--mapping_min_read_length",
-            str(config.mapping_qc.min_read_length),
-            "--mapping_min_mean_qscore",
-            str(config.mapping_qc.min_mean_qscore),
-            "--coverage_window_size",
-            str(config.mapping_qc.coverage_window_size),
+            "--kmer_k",
+            str(sample.kmer.k),
+            "--kmer_low_coverage_peak_threshold",
+            str(sample.kmer.low_coverage_peak_threshold),
             "--max_threads",
-            str(config.resources.max_threads),
+            str(sample.resources.max_threads),
             "--max_memory_gb",
-            str(config.resources.max_memory_gb),
-            "--assembly_fasta",
-            str(assembly_fasta),
-            "--assembly_manifest",
-            str(assembly_manifest),
-            "--meryl_db",
-            str(meryl_db),
-            "--kmer_histogram",
-            str(kmer_histogram),
+            str(sample.resources.max_memory_gb),
         ]
     )
-    _append_optional_nextflow_param(
+    _append_optional(command, "--expected_genome_size", sample.expected_genome_size)
+    (command_runner or _run_command)(
         command,
-        "--expected_genome_size",
-        config.expected_genome_size,
+        pre_qc_root,
+        declared_subprocess_environment(sample),
     )
-    _append_optional_nextflow_param(command, "--reference_genome", config.reference_genome)
-    _append_optional_nextflow_param(command, "--busco_lineage", config.busco_lineage)
-    try:
-        subprocess.run(command, cwd=PROJECT_ROOT, env=_nextflow_environment(), check=True)
-    except subprocess.CalledProcessError as exc:
-        raise ToolExecutionError(
-            f"Post-QC workflow failed with exit code {exc.returncode}: {' '.join(command)}"
-        ) from exc
-    return NextflowRunResult(tuple(command), run_dir, reads_manifest)
-
-
-def run_candidate_workflow(
-    run_dir: Path,
-    candidate: AssemblyConfig,
-    *,
-    resume: bool = True,
-    execution_run_dir: Path | None = None,
-) -> NextflowRunResult:
-    """Run one whitelisted candidate plus the identical Stage 7 post-QC process set."""
-    resolved_run = run_dir.resolve()
-    output_run = execution_run_dir.resolve() if execution_run_dir is not None else resolved_run
-    if candidate.run_id == "baseline" or candidate.retry_kind != "PARAMETER_OPTIMIZATION":
-        raise ToolExecutionError("Candidate workflow requires a non-baseline optimization config")
-    resolved_config = resolved_run / "00_metadata/resolved_config.yaml"
-    validation_receipt = resolved_run / "00_metadata/validation_receipt.json"
-    reads_manifest = resolved_run / "00_metadata/hifi_reads.list"
-    raw_metrics = resolved_run / "01_pre_qc/raw_metrics.json"
-    meryl_db = resolved_run / "01_pre_qc/kmer/read.meryl"
-    kmer_histogram = resolved_run / "01_pre_qc/kmer/kmer_histogram.tsv"
-    baseline_bins = resolved_run / "02_assembly/baseline/bins"
     required = (
-        resolved_config,
-        validation_receipt,
-        reads_manifest,
-        raw_metrics,
-        meryl_db,
-        baseline_bins,
+        run_dir / "01_pre_qc/raw_metrics.json",
+        run_dir / "01_pre_qc/kmer/read.meryl",
+        run_dir / "01_pre_qc/kmer/kmer_histogram.tsv",
     )
     missing = [str(path) for path in required if not path.exists()]
     if missing:
-        raise ToolExecutionError(f"Candidate workflow input(s) missing: {', '.join(missing)}")
-    raw_config = yaml.safe_load(resolved_config.read_text())
-    if not isinstance(raw_config, dict):
-        raise ToolExecutionError(f"Resolved config is not a YAML mapping: {resolved_config}")
-    config = SampleConfig.model_validate(raw_config)
-    verify_validation_receipt(config, validation_receipt)
-    verify_recorded_input_checksums(resolved_run / "00_metadata/input_checksums.tsv")
-    if candidate.threads > config.resources.max_threads:
-        raise ToolExecutionError("Candidate threads exceed validated resource limits")
-    if candidate.input_reads != config.hifi_reads:
-        raise ToolExecutionError("Candidate reads differ from the validated baseline inputs")
-
-    reuse_manifest = _write_hifiasm_bin_reuse_manifest(
-        output_run / "00_metadata" / f"{candidate.run_id}_bin_reuse.tsv",
-        baseline_bins,
-        f"{config.sample_id}.baseline",
-    )
-    if len(reuse_manifest.read_text().splitlines()) <= 1:
-        raise ToolExecutionError("No compatible baseline hifiasm .bin files are available")
-    prelaunch_contract = output_run / "00_metadata" / f"{candidate.run_id}_parameter_contract"
-    write_hifiasm_contract_artifacts(candidate, prelaunch_contract)
-
-    nextflow = _find_nextflow()
-    kmer_source = "independent_high_confidence" if config.kmer_reads else "same_data_advisory"
-    nextflow_work = output_run / ".nextflow_work"
-    nextflow_work.mkdir(parents=True, exist_ok=True)
-    command = [
-        nextflow,
-        "run",
-        str(WORKFLOW_ENTRY),
-        "-c",
-        str(WORKFLOW_CONFIG),
-        "-profile",
-        "local",
-        "-entry",
-        "CANDIDATE_ONLY",
-        "-work-dir",
-        str(nextflow_work),
-    ]
-    if resume:
-        command.append("-resume")
-    parameters = candidate.parameters
-    command.extend(
-        [
-            "--sample_id",
-            config.sample_id,
-            "--assembly_run_id",
-            candidate.run_id,
-            "--hifiasm_purge_level",
-            str(parameters.purge_level),
-            "--hifiasm_purge_similarity",
-            str(parameters.purge_similarity),
-            "--hifiasm_disable_post_join",
-            str(parameters.disable_post_join).lower(),
-            "--reads_manifest",
-            str(reads_manifest),
-            "--raw_metrics",
-            str(raw_metrics),
-            "--bin_reuse_manifest",
-            str(reuse_manifest),
-            "--meryl_db",
-            str(meryl_db),
-            "--kmer_histogram",
-            str(kmer_histogram),
-            "--kmer_source",
-            kmer_source,
-            "--outdir",
-            str(output_run),
-            "--validation_receipt",
-            str(validation_receipt),
-            "--mapping_min_read_length",
-            str(config.mapping_qc.min_read_length),
-            "--mapping_min_mean_qscore",
-            str(config.mapping_qc.min_mean_qscore),
-            "--coverage_window_size",
-            str(config.mapping_qc.coverage_window_size),
-            "--max_threads",
-            str(min(candidate.threads, config.resources.max_threads)),
-            "--max_memory_gb",
-            str(config.resources.max_memory_gb),
-        ]
-    )
-    _append_optional_nextflow_param(
-        command,
-        "--expected_genome_size",
-        config.expected_genome_size,
-    )
-    _append_optional_nextflow_param(command, "--hifiasm_hom_cov", parameters.hom_cov)
-    _append_optional_nextflow_param(command, "--reference_genome", config.reference_genome)
-    _append_optional_nextflow_param(command, "--busco_lineage", config.busco_lineage)
-    try:
-        subprocess.run(command, cwd=PROJECT_ROOT, env=_nextflow_environment(), check=True)
-    except subprocess.CalledProcessError as exc:
         raise ToolExecutionError(
-            f"Candidate workflow failed with exit code {exc.returncode}: {' '.join(command)}"
-        ) from exc
-    expected = (
-        output_run / f"02_assembly/{candidate.run_id}/metadata/assembly_manifest.json",
-        output_run / f"02_assembly/{candidate.run_id}/fasta/{candidate.run_id}.primary.fa",
-        output_run / f"03_post_qc/{candidate.run_id}/assembly_metrics.json",
-    )
-    missing_outputs = [str(path) for path in expected if not path.is_file()]
-    if missing_outputs:
-        raise ToolExecutionError(
-            f"Candidate workflow completed without required output(s): {', '.join(missing_outputs)}"
+            "Pre-QC completed without required artifact(s): " + ", ".join(missing)
         )
-    candidate_metadata = output_run / "02_assembly" / candidate.run_id / "metadata"
-    command_path = candidate_metadata / "hifiasm_command.txt"
-    write_hifiasm_contract_artifacts(
-        candidate,
-        candidate_metadata,
-        command_path=command_path,
-    )
-    return NextflowRunResult(tuple(command), output_run, reads_manifest)
-
-
-def _find_nextflow() -> str:
-    nextflow = shutil.which("nextflow")
-    if nextflow is not None:
-        return nextflow
-
-    local_nextflow = Path("/home/gw/software/nextflow")
-    if local_nextflow.is_file():
-        return str(local_nextflow)
-
-    raise ToolExecutionError("Nextflow executable was not found on PATH.")
-
-
-def _append_optional_nextflow_param(
-    command: list[str],
-    name: str,
-    value: object | None,
-) -> None:
-    """Append a Nextflow parameter only when it has a real value.
-
-    Passing a bare Nextflow flag without a value is interpreted as boolean true,
-    which is not equivalent to a missing optional numeric parameter.
-    """
-    if value is None or (isinstance(value, str) and not value.strip()):
-        return
-    command.extend([name, str(value)])
-
-
-def _write_path_manifest(output: Path, paths: list[Path]) -> Path:
-    """Write one absolute input path per line for Nextflow staging."""
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w") as handle:
-        for read_path in paths:
-            handle.write(str(read_path))
-            handle.write("\n")
-    return output
-
-
-def _write_hifiasm_bin_reuse_manifest(
-    output: Path,
-    published_bins: Path,
-    prefix: str,
-) -> Path:
-    """Record compatible same-prefix hifiasm bins as declared workflow input."""
-    output.parent.mkdir(parents=True, exist_ok=True)
-    candidates = sorted(published_bins.glob(f"{prefix}*.bin")) if published_bins.is_dir() else []
-    with output.open("w") as handle:
-        handle.write("path\tsha256\tbytes\n")
-        for candidate in candidates:
-            digest = hashlib.sha256()
-            with candidate.open("rb") as source:
-                for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                    digest.update(chunk)
-            handle.write(
-                f"{candidate.resolve()}\t{digest.hexdigest()}\t{candidate.stat().st_size}\n"
+    entries = []
+    for path in sorted((run_dir / "01_pre_qc").rglob("*")):
+        relative_pre_qc = path.relative_to(run_dir / "01_pre_qc")
+        if (
+            not path.is_file()
+            or relative_pre_qc.is_relative_to(Path("work"))
+            or path == inventory_path
+        ):
+            continue
+        relative = path.relative_to(run_dir)
+        stat = path.stat()
+        entries.append(
+            ArtifactInventoryEntry(
+                relative_path=relative,
+                bytes=stat.st_size,
+                mtime_ns=stat.st_mtime_ns,
+                sha256=sha256_file(path),
             )
-    return output
+        )
+    inventory = ArtifactInventory(
+        attempt_id="pre_qc",
+        created_at=datetime.now(UTC),
+        entries=tuple(entries),
+    )
+    inventory_path.write_text(inventory.model_dump_json(indent=2) + "\n")
+    return assembly_inputs_from_run(run_dir)
 
 
-def _nextflow_environment() -> dict[str, str]:
-    env = os.environ.copy()
-    if LOCAL_JAVA_CMD.is_file():
-        env["JAVA_HOME"] = str(LOCAL_JAVA_HOME)
-        env["JAVA_CMD"] = str(LOCAL_JAVA_CMD)
-    return env
+def assembly_inputs_from_run(run_dir: Path) -> AssemblyInputManifest:
+    """Create explicit named inputs after verifying the pre-QC inventory."""
+    root = run_dir.resolve()
+    paths = {
+        "resolved_config": root / "00_metadata/resolved_config.yaml",
+        "validation_receipt": root / "00_metadata/validation_receipt.json",
+        "input_checksums": root / "00_metadata/input_checksums.tsv",
+        "reads_manifest": root / "00_metadata/hifi_reads.list",
+        "raw_metrics": root / "01_pre_qc/raw_metrics.json",
+        "meryl_db": root / "01_pre_qc/kmer/read.meryl",
+        "kmer_histogram": root / "01_pre_qc/kmer/kmer_histogram.tsv",
+        "pre_qc_inventory": root / "01_pre_qc/artifacts_manifest.json",
+    }
+    return AssemblyInputManifest(
+        artifacts={role: InputArtifact.from_path(path) for role, path in paths.items()}
+    )
+
+
+class NextflowAssemblyRunner:
+    """Execute baseline or candidate through the exact same Nextflow entry."""
+
+    def __init__(self, *, command_runner: CommandRunner | None = None) -> None:
+        self.command_runner = command_runner or _run_command
+
+    def run(self, invocation: WorkflowInvocation) -> WorkflowResult:
+        """Run assembly and post-QC with publish/work/cache below the attempt root."""
+        sample = invocation.sample
+        try:
+            resolved_config = invocation.inputs.require("resolved_config")
+            validation_receipt = invocation.inputs.require("validation_receipt")
+            input_checksums = invocation.inputs.require("input_checksums")
+            reads_manifest = invocation.inputs.require("reads_manifest")
+            raw_metrics = invocation.inputs.require("raw_metrics")
+            meryl_db = invocation.inputs.require("meryl_db")
+            kmer_histogram = invocation.inputs.require("kmer_histogram")
+        except ValueError as exc:
+            raise ToolExecutionError(str(exc)) from exc
+        if resolved_config != sample.outdir / "00_metadata/resolved_config.yaml":
+            raise ToolExecutionError("Resolved config role does not match the current run root")
+        verify_validation_receipt(sample, validation_receipt)
+        verify_recorded_input_checksums(input_checksums)
+
+        attempt_root = invocation.attempt_root.resolve()
+        workflow_root = attempt_root / "workflow"
+        assembly_root = attempt_root / "assembly"
+        post_qc_root = attempt_root / "post_qc"
+        work_root = workflow_root / "work"
+        for path in (workflow_root, assembly_root, post_qc_root, work_root):
+            path.mkdir(parents=True, exist_ok=True)
+        if invocation.resume:
+            cache_root = workflow_root / ".nextflow/cache"
+            if not cache_root.is_dir() or not any(cache_root.iterdir()):
+                raise InterruptedExecutionError(
+                    "Interrupted attempt cannot resume because its Nextflow cache is missing"
+                )
+        nextflow = resolve_configured_tool("nextflow", "nextflow", sample)
+        if nextflow is None:
+            raise ToolExecutionError("Nextflow executable was not resolved by current preflight")
+        parameters = invocation.approved_config.parameters
+        command = [
+            str(nextflow),
+            "run",
+            str(WORKFLOW_ENTRY),
+            "-c",
+            str(WORKFLOW_CONFIG),
+            "-profile",
+            "local",
+            "-entry",
+            "ASSEMBLY_ATTEMPT",
+            "-work-dir",
+            str(work_root),
+        ]
+        if invocation.resume:
+            command.append("-resume")
+        command.extend(
+            [
+                "--sample_id",
+                sample.sample_id,
+                "--assembly_run_id",
+                invocation.coordinate.logical_run_id,
+                "--hifiasm_purge_level",
+                str(parameters.purge_level),
+                "--hifiasm_purge_similarity",
+                str(parameters.purge_similarity),
+                "--hifiasm_disable_post_join",
+                str(parameters.disable_post_join).lower(),
+                "--reads_manifest",
+                str(reads_manifest),
+                "--raw_metrics",
+                str(raw_metrics),
+                "--meryl_db",
+                str(meryl_db),
+                "--kmer_histogram",
+                str(kmer_histogram),
+                "--kmer_source",
+                invocation.post_qc_contract.kmer_source,
+                "--outdir",
+                str(workflow_root),
+                "--assembly_publish_dir",
+                str(assembly_root),
+                "--post_qc_publish_dir",
+                str(post_qc_root),
+                "--validation_receipt",
+                str(validation_receipt),
+                "--mapping_min_read_length",
+                str(invocation.post_qc_contract.mapping_min_read_length),
+                "--mapping_min_mean_qscore",
+                str(invocation.post_qc_contract.mapping_min_mean_qscore),
+                "--coverage_window_size",
+                str(invocation.post_qc_contract.coverage_window_size),
+                "--max_threads",
+                str(invocation.approved_config.threads),
+                "--max_memory_gb",
+                str(sample.resources.max_memory_gb),
+            ]
+        )
+        _append_optional(command, "--expected_genome_size", sample.expected_genome_size)
+        _append_optional(command, "--hifiasm_hom_cov", parameters.hom_cov)
+        _append_optional(command, "--reference_genome", sample.reference_genome)
+        _append_optional(command, "--busco_lineage", sample.busco_lineage)
+        if sample.tools.busco_lineage_dir is not None:
+            _append_optional(command, "--busco_download_path", sample.tools.busco_lineage_dir)
+
+        started = time.monotonic()
+        self.command_runner(command, workflow_root, declared_subprocess_environment(sample))
+        elapsed_hours = (time.monotonic() - started) / 3600
+        command_path = assembly_root / "metadata/hifiasm_command.txt"
+        metrics_path = post_qc_root / "assembly_metrics.json"
+        primary_path = assembly_root / f"fasta/{invocation.coordinate.logical_run_id}.primary.fa"
+        required = (command_path, metrics_path, primary_path)
+        missing = [str(path) for path in required if not path.is_file()]
+        if missing:
+            raise ToolExecutionError(
+                "Nextflow attempt completed without required artifact(s): " + ", ".join(missing)
+            )
+        try:
+            realized = tuple(shlex.split(command_path.read_text()))
+        except ValueError as exc:
+            raise ToolExecutionError("Recorded hifiasm command is not valid argv") from exc
+        artifacts = tuple(
+            path
+            for root in (assembly_root, post_qc_root, workflow_root / "logs")
+            if root.exists()
+            for path in sorted(root.rglob("*"))
+            if path.is_file()
+        )
+        return WorkflowResult(
+            command=tuple(command),
+            realized_hifiasm_argv=realized,
+            artifacts=artifacts,
+            tool_versions=_read_tool_versions(assembly_root),
+            resource_usage=_read_resource_usage(assembly_root, elapsed_hours=elapsed_hours),
+        )
+
+
+def _run_command(command: list[str], cwd: Path, environment: dict[str, str]) -> None:
+    try:
+        subprocess.run(command, cwd=cwd, env=environment, check=True)
+    except subprocess.CalledProcessError as exc:
+        if exc.returncode in {
+            -signal.SIGINT,
+            -signal.SIGTERM,
+            128 + signal.SIGINT,
+            128 + signal.SIGTERM,
+        }:
+            raise InterruptedExecutionError(
+                f"Nextflow assembly attempt was interrupted with exit code {exc.returncode}"
+            ) from exc
+        raise ToolExecutionError(
+            f"Nextflow assembly attempt failed with exit code {exc.returncode}"
+        ) from exc
+
+
+def _append_optional(command: list[str], name: str, value: object | None) -> None:
+    if value is not None and (not isinstance(value, str) or value.strip()):
+        command.extend((name, str(value)))
+
+
+def _read_tool_versions(assembly_root: Path) -> dict[str, str]:
+    versions: dict[str, str] = {}
+    for name, relative in (
+        ("hifiasm", "metadata/hifiasm.version.txt"),
+        ("gfatools", "metadata/gfatools.version.txt"),
+    ):
+        path = assembly_root / relative
+        if path.is_file():
+            versions[name] = path.read_text(errors="replace").strip()[:500]
+    return versions
+
+
+def _read_resource_usage(assembly_root: Path, *, elapsed_hours: float) -> ResourceUsage:
+    """Read hifiasm CPU/RSS evidence and include end-to-end attempt walltime."""
+    manifest = assembly_root / "metadata/assembly_manifest.json"
+    if not manifest.is_file():
+        return ResourceUsage(walltime_hours=elapsed_hours)
+    try:
+        payload = json.loads(manifest.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ToolExecutionError(f"Assembly resource manifest is invalid: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ToolExecutionError("Assembly resource manifest must contain a JSON object")
+    cpu_seconds = _nonnegative_number(payload.get("cpu_seconds"))
+    peak_rss_gb = _nonnegative_number(payload.get("peak_rss_gb"))
+    return ResourceUsage(
+        cpu_hours=(cpu_seconds or 0.0) / 3600,
+        walltime_hours=elapsed_hours,
+        peak_rss_gib=(peak_rss_gb * (1000**3) / (1024**3) if peak_rss_gb is not None else None),
+    )
+
+
+def _nonnegative_number(value: object) -> float | None:
+    if isinstance(value, int | float) and not isinstance(value, bool) and value >= 0:
+        return float(value)
+    return None
+
+
+def _write_or_verify_lines(path: Path, values: list[Path]) -> None:
+    content = "".join(f"{value.resolve()}\n" for value in values)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.read_text() != content:
+        raise ToolExecutionError(f"current input manifest drift: {path}")
+    if not path.exists():
+        path.write_text(content)
+
+
+def _verify_pre_qc_inventory(run_dir: Path, inventory_path: Path) -> None:
+    try:
+        inventory = ArtifactInventory.model_validate_json(inventory_path.read_text())
+    except (OSError, ValueError) as exc:
+        raise ToolExecutionError(f"Pre-QC inventory is invalid: {exc}") from exc
+    for entry in inventory.entries:
+        path = run_dir / entry.relative_path
+        if not path.is_file() or sha256_file(path) != entry.sha256:
+            raise ToolExecutionError(f"Pre-QC artifact inventory drift: {entry.relative_path}")
+
+
+def nextflow_child_environment(invocation: WorkflowInvocation) -> dict[str, str]:
+    """Expose the declared environment helper for deterministic acceptance tests."""
+    environment = declared_subprocess_environment(invocation.sample)
+    return {key: value for key, value in environment.items() if key in {"PATH", "PYTHONPATH"}}

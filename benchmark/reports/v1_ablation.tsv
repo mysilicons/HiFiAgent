@@ -1,4 +1,0 @@
-ablation_id	safety_regression	conclusion
-remove_rag	false	RAG improves traceable explanation and is not an authority for tuning.
-n50_only_selector	true	N50-only selection misses completeness and structural-quality regressions.
-remove_failure_gate	true	Engineering failures must be separated from biological decisions.

@@ -1,4 +1,4 @@
-"""Structured post-assembly metrics produced by phase 7."""
+"""Structured post-assembly metrics produced by the current attempt workflow."""
 
 from typing import Literal
 
@@ -10,7 +10,7 @@ class AssemblyMetrics(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1.0"] = "1.0"
+    schema_id: Literal["hifi-agent"] = "hifi-agent"
     run_id: str
     assembly_size: int | None = None
     contig_count: int | None = None

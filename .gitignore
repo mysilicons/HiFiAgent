@@ -30,7 +30,6 @@ logs/
 data/
 !src/hifi_agent/data/
 !src/hifi_agent/data/**
-knowledge/index.json
 *.fastq
 *.fastq.gz
 *.fq

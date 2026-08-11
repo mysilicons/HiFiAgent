@@ -1,4 +1,4 @@
-"""Validated Stage 12 report and synthetic scenario schemas."""
+"""Machine-readable production terminal report contracts."""
 
 from __future__ import annotations
 
@@ -6,184 +6,161 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
-
-from hifi_agent.agent.models import AssemblyParameters
-from hifi_agent.rules.models import RiskLevel
-from hifi_agent.schemas.metrics import AssemblyMetrics
-
-ReportStatus = Literal["SUCCESS", "WARNING", "FAILED", "NOT_RUN"]
-MetricValue = bool | int | float | str | None
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-class ModuleRecord(BaseModel):
-    """Success, warning, failure, or not-run status for one report module."""
+class AttemptSummary(BaseModel):
+    """Manifest-derived facts for one assembly attempt."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    module: str
-    status: ReportStatus
-    source_file: str | None = None
-    message: str
-    limitations: list[str] = Field(default_factory=list)
+    attempt_id: str
+    attempt_ref: Path
+    round_index: int
+    candidate_index: int | None
+    status: str
+    comparison_eligible: bool
+    requested_config: dict[str, object]
+    approved_parameters: dict[str, bool | int | float | None]
+    rendered_argv: tuple[str, ...]
+    realized_parameters: dict[str, bool | int | float | None] | None
+    metrics: dict[str, bool | int | float | str | None]
+    resource_usage: dict[str, float | int | None]
+    error: str | None
+    reason_codes: tuple[str, ...]
 
-
-class ProvenanceRecord(BaseModel):
-    """Checksum and role of one source artifact consumed by the report."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    artifact_id: str
-    role: str
-    path: str
-    status: Literal["AVAILABLE", "MISSING", "INVALID"]
-    sha256: str | None = None
-    byte_size: int | None = None
-
-
-class MetricRecord(BaseModel):
-    """One displayed metric with exact source file and JSON pointer."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    metric: str
-    label: str
-    value: MetricValue
-    unit: str | None = None
-    source_file: str
-    json_pointer: str
-    synthetic: bool = False
-    transformation: str | None = None
+    @field_validator("attempt_ref")
+    @classmethod
+    def safe_ref(cls, value: Path) -> Path:
+        """Reject attempt references outside the current run root."""
+        if value.is_absolute() or ".." in value.parts:
+            raise ValueError("report attempt references must be run-relative")
+        return value
 
 
-class InputRecord(BaseModel):
-    """Checksum-backed input record with optionally redacted path."""
+class RoundSummary(BaseModel):
+    """Manifest-derived incumbent transition for one completed round."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    role: str
-    path: str
-    sha256: str
-    byte_size: int = Field(ge=0)
-
-
-class SoftwareRecord(BaseModel):
-    """Tool version and the artifact from which it was recovered."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    tool: str
-    version: str | None
-    source_file: str
+    round_index: int
+    round_ref: Path
+    incumbent_before_ref: Path | None
+    incumbent_after_ref: Path | None
+    outcome: str
+    stop_reason_codes: tuple[str, ...]
+    comparison_ref: Path | None
+    approved_candidate_count: int
+    rejected_candidate_count: int
+    attempt_count: int
 
 
-class ParameterChange(BaseModel):
-    """Candidate parameter difference with reason, evidence, risk, and result."""
+class LLMActivitySummary(BaseModel):
+    """Secret-free account of whether an LLM participated in a round."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    run_id: str
-    parameter: str
-    baseline_value: MetricValue
-    candidate_value: MetricValue
-    reason_codes: list[str]
-    evidence: dict[str, MetricValue]
-    risk_level: RiskLevel
-    result: str
-    synthetic: bool = False
-
-
-class AssemblyRunRecord(BaseModel):
-    """Baseline, real candidate, or explicitly synthetic candidate report row."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    run_id: str
-    kind: Literal["baseline", "synthetic_baseline", "candidate", "synthetic_candidate"]
-    status: ReportStatus
-    parameters: dict[str, MetricValue]
-    metrics: dict[str, MetricRecord]
-    reason_codes: list[str] = Field(default_factory=list)
-    risk_level: RiskLevel = "low"
-    result: str
-    synthetic: bool = False
+    round_index: int
+    status: str
+    provider: str | None
+    model: str | None
+    call_id: str
+    prompt_sha256: str | None
+    output_sha256: str | None
+    failure_reason: str | None
 
 
-class FinalReportData(BaseModel):
-    """Complete machine-readable input to the Stage 12 Jinja2 template."""
+class ProposalSummary(BaseModel):
+    """Manifest-derived approved or rejected proposal, including execution linkage."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal["1.0"] = "1.0"
+    round_index: int = Field(ge=1, le=3)
+    proposal_id: str
+    disposition: Literal["APPROVED", "REJECTED"]
+    candidate_index: int | None = Field(default=None, ge=1, le=2)
+    origin: Literal["rule", "llm"]
+    requested_changes: dict[str, object]
+    approved_diff: dict[str, bool | int | float | None] | None
+    parameter_fingerprint: str | None
+    source_ids: tuple[str, ...]
+    metric_ids: tuple[str, ...]
+    reason_codes: tuple[str, ...]
+    executed_attempt_refs: tuple[Path, ...] = ()
+
+    @field_validator("executed_attempt_refs")
+    @classmethod
+    def safe_executed_refs(cls, value: tuple[Path, ...]) -> tuple[Path, ...]:
+        """Reject proposal execution references outside the current run root."""
+        if any(item.is_absolute() or ".." in item.parts for item in value):
+            raise ValueError("proposal execution references must be run-relative")
+        return value
+
+
+class FinalSummary(BaseModel):
+    """Authoritative terminal summary from which Markdown and TSV files are derived."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_id: Literal["hifi-agent"] = "hifi-agent"
     generated_at: datetime
-    report_status: ReportStatus
+    run_uuid: str = Field(pattern=r"^[0-9a-f]{32}$")
     sample_id: str
-    run_dir: str
-    paths_redacted: bool
-    scenario_id: str | None = None
-    scenario_disclaimer: str | None = None
-    sample_config: dict[str, object]
-    inputs: list[InputRecord]
-    pre_qc_metrics: dict[str, MetricRecord]
-    filtering_metrics: dict[str, MetricRecord]
-    software_versions: list[SoftwareRecord]
-    assembly_runs: list[AssemblyRunRecord]
-    parameter_changes: list[ParameterChange]
-    rule_facts: dict[str, object]
-    agent_summary: dict[str, object]
-    optimization_summary: dict[str, object]
-    rag_explanation: dict[str, object]
-    final_selection: str
-    final_selection_reason: str
-    warnings: list[str]
-    limitations: list[str]
-    errors: list[str]
-    modules: list[ModuleRecord]
-    provenance: list[ProvenanceRecord]
-    figures: list[str]
-    reproducible_commands: list[str]
+    package_version: str
+    code_commit: str
+    terminal_outcome: str
+    outcome_class: Literal["SCIENTIFIC", "ACTION_REQUIRED", "FAILED"]
+    process_exit_code: Literal[0, 3, 4, 5]
+    selected_run_ref: Path | None
+    baseline_run_ref: Path | None
+    incumbent_chain: tuple[Path, ...]
+    attempts: tuple[AttemptSummary, ...]
+    rounds: tuple[RoundSummary, ...]
+    proposals: tuple[ProposalSummary, ...] = ()
+    llm_activity: tuple[LLMActivitySummary, ...]
+    budget_limits: dict[str, float]
+    budget_reserved: dict[str, float]
+    budget_committed: dict[str, float]
+    budget_remaining: dict[str, float]
+    stop_reason_codes: tuple[str, ...]
+    scientific_limitations: tuple[str, ...]
+    verification_status: Literal["PENDING", "PASS", "WARNING", "FAIL"]
+
+    @field_validator("selected_run_ref", "baseline_run_ref")
+    @classmethod
+    def safe_ref(cls, value: Path | None) -> Path | None:
+        """Reject selected or baseline references outside the current run root."""
+        if value is not None and (value.is_absolute() or ".." in value.parts):
+            raise ValueError("report selected/baseline references must be run-relative")
+        return value
+
+    @model_validator(mode="after")
+    def validate_terminal_contract(self) -> FinalSummary:
+        """Bind exit semantics and the selected run to the reported incumbent chain."""
+        expected = process_exit_code_for_terminal(self.terminal_outcome, self.outcome_class)
+        if self.process_exit_code != expected:
+            raise ValueError("report process exit code differs from its terminal outcome class")
+        if any(item.is_absolute() or ".." in item.parts for item in self.incumbent_chain):
+            raise ValueError("report incumbent chain references must be run-relative")
+        if self.baseline_run_ref is not None and (
+            not self.incumbent_chain or self.incumbent_chain[0] != self.baseline_run_ref
+        ):
+            raise ValueError("report incumbent chain does not start at baseline")
+        chain_selected = self.incumbent_chain[-1] if self.incumbent_chain else None
+        if self.selected_run_ref != chain_selected:
+            raise ValueError("report selected run differs from the incumbent chain tail")
+        return self
 
 
-class SyntheticTransformation(BaseModel):
-    """Auditable transformation from a real metric to one synthetic value."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    metric: str
-    operation: Literal["set", "multiply", "derive_ratio"]
-    source_value: int | float
-    synthetic_value: int | float
-    rationale: str
-
-
-class SyntheticCandidate(BaseModel):
-    """Artificial candidate used only to validate Stage 12 reporting."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    run_id: str
-    parameters: AssemblyParameters
-    reason_codes: list[str]
-    evidence: dict[str, MetricValue]
-    risk_level: RiskLevel
-    result: str
-    metrics: AssemblyMetrics
-
-
-class SyntheticReportScenario(BaseModel):
-    """Provenance-rich artificial anomaly derived from genuine Candida data."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: Literal["1.0"] = "1.0"
-    scenario_id: str
-    generated_at: datetime
-    synthetic: Literal[True] = True
-    disclaimer: str
-    source_sample_id: str
-    source_run_id: Literal["baseline"] = "baseline"
-    source_run_dir: Path
-    source_artifacts: dict[str, str]
-    source_sha256: dict[str, str]
-    transformations: list[SyntheticTransformation]
-    candidate: SyntheticCandidate
+def process_exit_code_for_terminal(
+    outcome: str,
+    outcome_class: Literal["SCIENTIFIC", "ACTION_REQUIRED", "FAILED"],
+) -> Literal[0, 3, 4, 5]:
+    """Map one current terminal classification to the stable CLI exit contract."""
+    if outcome == "FAILED_REQUIRED_LLM":
+        return 5
+    if outcome_class == "ACTION_REQUIRED":
+        return 3
+    if outcome_class == "FAILED":
+        return 4
+    return 0

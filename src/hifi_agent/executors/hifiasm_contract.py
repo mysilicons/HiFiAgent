@@ -1,52 +1,103 @@
-"""Bidirectional command contract for approved hifiasm candidate parameters."""
+"""Bidirectional current argv contract for all hifiasm attempts."""
 
 from __future__ import annotations
 
-import json
 import shlex
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from hifi_agent.agent.models import AssemblyConfig, AssemblyParameters
 from hifi_agent.exceptions import ToolExecutionError
+from hifi_agent.schemas.assembly import AssemblyConfig, AssemblyParameters
 
 
-@dataclass(frozen=True)
-class HifiasmCommandContract:
-    """A successful comparison of approved and realized hifiasm parameters."""
+class RenderedArgv(BaseModel):
+    """Tokenized, shell-free command rendered from an approved full config."""
 
-    status: Literal["PASS"]
-    rendered_parameter_argv: tuple[str, ...]
-    realized_command_argv: tuple[str, ...]
-    realized_parameters: AssemblyParameters
-    input_reads: tuple[str, ...]
-    threads: int
-    output_prefix: str
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_id: Literal["hifi-agent"] = "hifi-agent"
+    argv: tuple[str, ...] = Field(min_length=2)
+
+
+class RealizedParameters(BaseModel):
+    """Parameters parsed back from the command actually recorded by the tool."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_id: Literal["hifi-agent"] = "hifi-agent"
+    parameters: AssemblyParameters
+    threads: int = Field(ge=1)
+    output_prefix: str = Field(min_length=1)
+    input_reads: tuple[str, ...] = Field(min_length=1)
+    realized_argv: tuple[str, ...] = Field(min_length=2)
+
+
+class ParameterFieldCheck(BaseModel):
+    """Approved/rendered/realized equality result for one parameter."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    field: str
+    approved: bool | int | float | None
+    rendered: bool | int | float | None
+    realized: bool | int | float | None
+    matches: bool
+
+
+class ParameterContractCheck(BaseModel):
+    """Field-level proof that execution matched the approved configuration."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_id: Literal["hifi-agent"] = "hifi-agent"
+    status: Literal["PASS", "FAIL"]
+    field_checks: tuple[ParameterFieldCheck, ...]
+    reason_codes: tuple[str, ...] = Field(min_length=1)
 
 
 def render_hifiasm_parameter_argv(parameters: AssemblyParameters) -> tuple[str, ...]:
-    """Render the complete whitelisted parameter vector for a candidate run."""
+    """Render only whitelisted flags, omitting null and false values."""
     argv = ["-l", str(parameters.purge_level), "-s", str(parameters.purge_similarity)]
     if parameters.hom_cov is not None:
         argv.extend(["--hom-cov", str(parameters.hom_cov)])
     if parameters.disable_post_join:
         argv.append("-u0")
     rendered = tuple(argv)
-    realized = parse_hifiasm_parameter_argv(rendered)
-    if realized != parameters:
-        raise ToolExecutionError(
-            "Rendered hifiasm parameters do not round-trip to the approved configuration"
-        )
+    if parse_hifiasm_parameter_argv(rendered) != parameters:
+        raise ToolExecutionError("Rendered hifiasm parameters do not round-trip")
     return rendered
 
 
+def render_hifiasm_argv(
+    config: AssemblyConfig,
+    *,
+    executable: str,
+    output_prefix: str,
+) -> RenderedArgv:
+    """Render the exact token vector; callers must execute without a shell."""
+    if not executable or "\x00" in executable or not output_prefix:
+        raise ToolExecutionError("Invalid hifiasm executable or output prefix")
+    argv = (
+        executable,
+        "-o",
+        output_prefix,
+        "-t",
+        str(config.threads),
+        *render_hifiasm_parameter_argv(config.parameters),
+        *(str(path) for path in config.input_reads),
+    )
+    realized = parse_hifiasm_argv(argv)
+    if realized.parameters != config.parameters or realized.threads != config.threads:
+        raise ToolExecutionError("Rendered hifiasm argv does not match approved config")
+    return RenderedArgv(argv=argv)
+
+
 def parse_hifiasm_parameter_argv(argv: Sequence[str]) -> AssemblyParameters:
-    """Parse a parameter-only argv and reject unknown, duplicate, or malformed flags."""
-    values: dict[str, int | float | bool | None] = {
+    """Reject unknown, duplicate, malformed, shell, path, and environment tokens."""
+    values: dict[str, bool | int | float | None] = {
         "purge_level": 3,
         "purge_similarity": 0.55,
         "hom_cov": None,
@@ -58,222 +109,126 @@ def parse_hifiasm_parameter_argv(argv: Sequence[str]) -> AssemblyParameters:
         flag = argv[index]
         if flag in seen:
             raise ToolExecutionError(f"Duplicate hifiasm parameter flag: {flag}")
-        seen.add(flag)
         if flag == "-u0":
+            seen.add(flag)
             values["disable_post_join"] = True
             index += 1
             continue
-        field_and_type = {
+        specification = {
             "-l": ("purge_level", int),
             "-s": ("purge_similarity", float),
             "--hom-cov": ("hom_cov", int),
         }.get(flag)
-        if field_and_type is None:
-            raise ToolExecutionError(f"Unapproved hifiasm parameter flag: {flag}")
+        if specification is None:
+            raise ToolExecutionError(f"Unapproved hifiasm parameter token: {flag}")
         if index + 1 >= len(argv):
             raise ToolExecutionError(f"Missing value for hifiasm parameter flag: {flag}")
-        raw_value = argv[index + 1]
-        field, converter = field_and_type
+        raw = argv[index + 1]
+        if _unsafe_parameter_token(raw):
+            raise ToolExecutionError(f"Unsafe hifiasm parameter token: {raw}")
+        field, converter = specification
         try:
-            values[field] = converter(raw_value)
+            values[field] = converter(raw)
         except ValueError as exc:
-            raise ToolExecutionError(
-                f"Invalid value `{raw_value}` for hifiasm parameter flag {flag}"
-            ) from exc
+            raise ToolExecutionError(f"Invalid value `{raw}` for {flag}") from exc
+        seen.add(flag)
         index += 2
     try:
         return AssemblyParameters.model_validate(values)
     except ValidationError as exc:
-        raise ToolExecutionError(f"Realized hifiasm parameters violate the schema: {exc}") from exc
-
-
-def parse_hifiasm_command(
-    command_text: str,
-) -> tuple[AssemblyParameters, tuple[str, ...], tuple[str, ...]]:
-    """Parse one recorded hifiasm command into parameters, full argv, and input reads."""
-    try:
-        argv = tuple(shlex.split(command_text))
-    except ValueError as exc:
         raise ToolExecutionError(
-            f"Recorded hifiasm command is not valid shell argv: {exc}"
+            f"Realized hifiasm parameters violate current schema: {exc}"
         ) from exc
-    if not argv or Path(argv[0]).name != "hifiasm":
-        raise ToolExecutionError("Recorded assembly command does not invoke hifiasm")
 
-    parameter_argv: list[str] = []
-    input_reads: list[str] = []
-    seen_runtime_flags: set[str] = set()
+
+def parse_hifiasm_argv(argv: Sequence[str]) -> RealizedParameters:
+    """Parse one full argv without evaluating shell syntax."""
+    tokens = tuple(argv)
+    if not tokens or Path(tokens[0]).name != "hifiasm":
+        raise ToolExecutionError("Recorded command does not invoke hifiasm")
+    parameter_tokens: list[str] = []
+    reads: list[str] = []
+    output_prefix: str | None = None
+    threads: int | None = None
+    seen_runtime: set[str] = set()
     index = 1
-    while index < len(argv):
-        token = argv[index]
+    while index < len(tokens):
+        token = tokens[index]
         if token in {"-o", "-t"}:
-            if token in seen_runtime_flags:
-                raise ToolExecutionError(f"Duplicate hifiasm runtime flag: {token}")
-            seen_runtime_flags.add(token)
-            if index + 1 >= len(argv):
-                raise ToolExecutionError(f"Missing value for hifiasm runtime flag: {token}")
+            if token in seen_runtime or index + 1 >= len(tokens):
+                raise ToolExecutionError(f"Duplicate or incomplete runtime flag: {token}")
+            value = tokens[index + 1]
+            if token == "-o":
+                output_prefix = value
+            else:
+                try:
+                    threads = int(value)
+                except ValueError as exc:
+                    raise ToolExecutionError("Invalid hifiasm thread count") from exc
+            seen_runtime.add(token)
             index += 2
             continue
         if token in {"-l", "-s", "--hom-cov"}:
-            if index + 1 >= len(argv):
+            if index + 1 >= len(tokens):
                 raise ToolExecutionError(f"Missing value for hifiasm parameter flag: {token}")
-            parameter_argv.extend([token, argv[index + 1]])
+            parameter_tokens.extend((token, tokens[index + 1]))
             index += 2
             continue
         if token == "-u0":
-            parameter_argv.append(token)
+            parameter_tokens.append(token)
             index += 1
             continue
         if token.startswith("-"):
             raise ToolExecutionError(f"Unapproved hifiasm command flag: {token}")
-        input_reads.append(token)
+        reads.append(token)
         index += 1
-
-    if not input_reads:
-        raise ToolExecutionError("Recorded hifiasm command contains no input reads")
-    return parse_hifiasm_parameter_argv(parameter_argv), argv, tuple(input_reads)
-
-
-def validate_hifiasm_command_contract(
-    approved: AssemblyConfig,
-    command_path: Path,
-) -> HifiasmCommandContract:
-    """Validate a recorded command against the complete approved candidate parameters."""
-    if not command_path.is_file():
-        raise ToolExecutionError(f"Recorded hifiasm command is missing: {command_path}")
-    rendered = render_hifiasm_parameter_argv(approved.parameters)
-    try:
-        realized, command_argv, input_reads = parse_hifiasm_command(command_path.read_text())
-    except ToolExecutionError as exc:
-        raise ToolExecutionError(f"PARAMETER_CONTRACT_VIOLATION: {exc}") from exc
-    threads = _runtime_integer(command_argv, "-t")
-    output_prefix = _runtime_string(command_argv, "-o")
-    expected_reads = tuple(path.name for path in approved.input_reads)
-    realized_reads = tuple(Path(path).name for path in input_reads)
-    differences: dict[str, object] = {**_parameter_differences(approved.parameters, realized)}
-    if threads != approved.threads:
-        differences["threads"] = {"approved": approved.threads, "realized": threads}
-    if not output_prefix.endswith(f".{approved.run_id}"):
-        differences["output_prefix"] = {
-            "approved_suffix": f".{approved.run_id}",
-            "realized": output_prefix,
-        }
-    if realized_reads != expected_reads:
-        differences["input_reads"] = {
-            "approved": list(expected_reads),
-            "realized": list(realized_reads),
-        }
-    if differences:
-        raise ToolExecutionError(
-            "PARAMETER_CONTRACT_VIOLATION: approved and realized hifiasm command differ: "
-            f"{differences}"
-        )
-    return HifiasmCommandContract(
-        status="PASS",
-        rendered_parameter_argv=rendered,
-        realized_command_argv=command_argv,
-        realized_parameters=realized,
-        input_reads=input_reads,
+    if output_prefix is None or threads is None or threads < 1 or not reads:
+        raise ToolExecutionError("Recorded command lacks output, threads, or input reads")
+    return RealizedParameters(
+        parameters=parse_hifiasm_parameter_argv(parameter_tokens),
         threads=threads,
         output_prefix=output_prefix,
+        input_reads=tuple(reads),
+        realized_argv=tokens,
     )
 
 
-def write_hifiasm_contract_artifacts(
+def check_parameter_contract(
     approved: AssemblyConfig,
-    metadata_dir: Path,
-    *,
-    command_path: Path | None = None,
-) -> HifiasmCommandContract | None:
-    """Write requested/approved/rendered artifacts and optionally finalize against a command."""
-    metadata_dir.mkdir(parents=True, exist_ok=True)
-    rendered = render_hifiasm_parameter_argv(approved.parameters)
-    _write_json(metadata_dir / "requested_config.json", approved.model_dump(mode="json"))
-    _write_json(metadata_dir / "approved_config.json", approved.model_dump(mode="json"))
-    _write_json(
-        metadata_dir / "rendered_argv.json",
-        {
-            "schema_version": "1.0",
-            "parameter_argv": list(rendered),
-            "threads": approved.threads,
-            "output_prefix_suffix": f".{approved.run_id}",
-            "input_read_names": [path.name for path in approved.input_reads],
-        },
-    )
-    if command_path is None:
-        return None
-
-    try:
-        result = validate_hifiasm_command_contract(approved, command_path)
-    except ToolExecutionError as exc:
-        _write_json(
-            metadata_dir / "parameter_contract_check.json",
-            {
-                "schema_version": "1.0",
-                "status": "FAIL",
-                "reason_code": "PARAMETER_CONTRACT_VIOLATION",
-                "error": str(exc),
-                "approved_parameters": approved.parameters.model_dump(mode="json"),
-            },
+    rendered: RenderedArgv,
+    realized: RealizedParameters,
+) -> ParameterContractCheck:
+    """Compare all approved, rendered, and realized parameter fields."""
+    rendered_values = parse_hifiasm_argv(rendered.argv).parameters
+    checks = tuple(
+        ParameterFieldCheck(
+            field=field,
+            approved=getattr(approved.parameters, field),
+            rendered=getattr(rendered_values, field),
+            realized=getattr(realized.parameters, field),
+            matches=(
+                getattr(approved.parameters, field)
+                == getattr(rendered_values, field)
+                == getattr(realized.parameters, field)
+            ),
         )
-        raise
-    _write_json(
-        metadata_dir / "realized_parameters.json",
-        {
-            "schema_version": "1.0",
-            "parameters": result.realized_parameters.model_dump(mode="json"),
-            "command_argv": list(result.realized_command_argv),
-            "input_reads": list(result.input_reads),
-            "threads": result.threads,
-            "output_prefix": result.output_prefix,
-        },
+        for field in AssemblyParameters.model_fields
     )
-    _write_json(
-        metadata_dir / "parameter_contract_check.json",
-        {
-            "schema_version": "1.0",
-            "status": "PASS",
-            "reason_code": "APPROVED_PARAMETERS_MATCH_REALIZED_COMMAND",
-            "approved_parameters": approved.parameters.model_dump(mode="json"),
-            "realized_parameters": result.realized_parameters.model_dump(mode="json"),
-            "differences": [],
-        },
+    runtime_matches = approved.threads == realized.threads
+    passed = all(item.matches for item in checks) and runtime_matches
+    return ParameterContractCheck(
+        status="PASS" if passed else "FAIL",
+        field_checks=checks,
+        reason_codes=(
+            ("APPROVED_RENDERED_REALIZED_MATCH",) if passed else ("PARAMETER_CONTRACT_MISMATCH",)
+        ),
     )
-    return result
 
 
-def _parameter_differences(
-    approved: AssemblyParameters,
-    realized: AssemblyParameters,
-) -> dict[str, dict[str, int | float | bool | None]]:
-    approved_values = approved.model_dump(mode="json")
-    realized_values = realized.model_dump(mode="json")
-    return {
-        field: {"approved": approved_values[field], "realized": realized_values[field]}
-        for field in approved_values
-        if approved_values[field] != realized_values[field]
-    }
+def display_command(argv: Sequence[str]) -> str:
+    """Render a display-only command; this string must never be executed."""
+    return shlex.join(argv)
 
 
-def _runtime_string(argv: tuple[str, ...], flag: str) -> str:
-    try:
-        index = argv.index(flag)
-        return argv[index + 1]
-    except (ValueError, IndexError) as exc:
-        raise ToolExecutionError(
-            f"Recorded hifiasm command is missing runtime flag {flag}"
-        ) from exc
-
-
-def _runtime_integer(argv: tuple[str, ...], flag: str) -> int:
-    value = _runtime_string(argv, flag)
-    try:
-        return int(value)
-    except ValueError as exc:
-        raise ToolExecutionError(
-            f"Recorded hifiasm runtime flag {flag} has invalid integer value `{value}`"
-        ) from exc
-
-
-def _write_json(path: Path, payload: object) -> None:
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+def _unsafe_parameter_token(token: str) -> bool:
+    return any(marker in token for marker in ("/", "\\", "$", "`", ";", "|", "&", "\n"))

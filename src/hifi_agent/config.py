@@ -1,10 +1,11 @@
-"""Configuration loading, input validation, and phase 2 metadata outputs."""
+"""Configuration loading, input validation, and metadata outputs."""
 
 from __future__ import annotations
 
 import gzip
 import hashlib
 import json
+import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,7 +17,7 @@ from pydantic import ValidationError
 from hifi_agent.exceptions import InputValidationError
 from hifi_agent.schemas.sample import SampleConfig
 
-UNSUPPORTED_V1_FIELDS = frozenset(
+UNSUPPORTED_INPUT_FIELDS = frozenset(
     {
         "hi_c_reads",
         "hic_reads",
@@ -47,6 +48,7 @@ class ConfigValidationResult:
     metadata_dir: Path
     resolved_config: Path
     input_checksums: Path
+    input_manifest: Path
     validation_receipt: Path
 
 
@@ -57,7 +59,7 @@ def validate_config_file(
 ) -> ConfigValidationResult:
     """Load, validate, and optionally materialize metadata for a sample config."""
     raw_config = _load_yaml_mapping(config_path)
-    _reject_unsupported_v1_fields(raw_config)
+    _reject_unsupported_input_fields(raw_config)
 
     try:
         config = SampleConfig.model_validate(raw_config)
@@ -70,16 +72,19 @@ def validate_config_file(
     metadata_dir = resolved_config.outdir / "00_metadata"
     resolved_config_path = metadata_dir / "resolved_config.yaml"
     input_checksums_path = metadata_dir / "input_checksums.tsv"
+    input_manifest_path = metadata_dir / "input_manifest.json"
     validation_receipt_path = metadata_dir / "validation_receipt.json"
 
     if write_outputs:
         metadata_dir.mkdir(parents=True, exist_ok=True)
         _write_resolved_config(resolved_config, resolved_config_path)
         _write_input_checksums(resolved_config, input_checksums_path)
+        _write_input_manifest(resolved_config, input_manifest_path)
         _write_validation_receipt(
             resolved_config,
             resolved_config_path,
             input_checksums_path,
+            input_manifest_path,
             validation_receipt_path,
         )
 
@@ -88,6 +93,7 @@ def validate_config_file(
         metadata_dir=metadata_dir,
         resolved_config=resolved_config_path,
         input_checksums=input_checksums_path,
+        input_manifest=input_manifest_path,
         validation_receipt=validation_receipt_path,
     )
 
@@ -111,6 +117,11 @@ def validate_sample_inputs(config: SampleConfig) -> None:
             _validate_fastq_first_record(read_path, field_name="kmer_reads")
     if config.reference_genome is not None:
         _validate_existing_file(config.reference_genome, field_name="reference_genome")
+    if config.optimization.llm_replay_transcript is not None:
+        _validate_existing_file(
+            config.optimization.llm_replay_transcript,
+            field_name="optimization.llm_replay_transcript",
+        )
 
 
 def verify_validation_receipt(config: SampleConfig, receipt_path: Path) -> None:
@@ -132,6 +143,7 @@ def verify_validation_receipt(config: SampleConfig, receipt_path: Path) -> None:
     artifacts = (
         ("resolved_config", "resolved_config_sha256"),
         ("input_checksums", "input_checksums_sha256"),
+        ("input_manifest", "input_manifest_sha256"),
     )
     for path_key, digest_key in artifacts:
         artifact_value = data.get(path_key)
@@ -186,13 +198,13 @@ def _load_yaml_mapping(config_path: Path) -> Mapping[str, Any]:
     return data
 
 
-def _reject_unsupported_v1_fields(data: Mapping[str, Any]) -> None:
-    unsupported = sorted(field for field in data if field in UNSUPPORTED_V1_FIELDS)
+def _reject_unsupported_input_fields(data: Mapping[str, Any]) -> None:
+    unsupported = sorted(field for field in data if field in UNSUPPORTED_INPUT_FIELDS)
     if unsupported:
         fields = ", ".join(f"`{field}`" for field in unsupported)
         raise InputValidationError(
-            f"Unsupported V1 field(s): {fields}. Hi-C, ONT, trio, and ultra-long inputs "
-            "are outside the V1 scope."
+            f"Unsupported input field(s): {fields}. Hi-C, ONT, trio, and ultra-long inputs "
+            "are outside the supported scope."
         )
 
 
@@ -207,16 +219,41 @@ def _format_pydantic_errors(exc: ValidationError) -> str:
 
 def _resolve_config_paths(config: SampleConfig, base_dir: Path) -> SampleConfig:
     resolved_base = base_dir.resolve()
-    hifi_reads = [_resolve_path(path, resolved_base) for path in config.hifi_reads]
+    input_base = _resolve_input_base(config, resolved_base)
+    hifi_reads = [_resolve_input_path(path, input_base, config) for path in config.hifi_reads]
     kmer_reads = (
-        [_resolve_path(path, resolved_base) for path in config.kmer_reads]
+        [_resolve_input_path(path, input_base, config) for path in config.kmer_reads]
         if config.kmer_reads is not None
         else None
     )
     reference_genome = (
-        _resolve_path(config.reference_genome, resolved_base)
+        _resolve_input_path(config.reference_genome, input_base, config)
         if config.reference_genome is not None
         else None
+    )
+    executable_overrides = {
+        name: _resolve_path(path, resolved_base)
+        for name, path in config.tools.executable_overrides.items()
+    }
+    busco_lineage_dir = (
+        _resolve_path(config.tools.busco_lineage_dir, resolved_base)
+        if config.tools.busco_lineage_dir is not None
+        else None
+    )
+    tools = config.tools.model_copy(
+        update={
+            "executable_overrides": executable_overrides,
+            "busco_lineage_dir": busco_lineage_dir,
+        }
+    )
+    optimization = config.optimization.model_copy(
+        update={
+            "llm_replay_transcript": (
+                _resolve_path(config.optimization.llm_replay_transcript, resolved_base)
+                if config.optimization.llm_replay_transcript is not None
+                else None
+            )
+        }
     )
 
     return config.model_copy(
@@ -225,6 +262,8 @@ def _resolve_config_paths(config: SampleConfig, base_dir: Path) -> SampleConfig:
             "outdir": _resolve_path(config.outdir, resolved_base),
             "kmer_reads": kmer_reads,
             "reference_genome": reference_genome,
+            "optimization": optimization,
+            "tools": tools,
         }
     )
 
@@ -235,12 +274,44 @@ def _resolve_path(path: Path, base_dir: Path) -> Path:
     return (base_dir / path).resolve()
 
 
+def _resolve_input_base(config: SampleConfig, config_base: Path) -> Path:
+    if config.input_root_env is None:
+        return config_base
+    value = os.environ.get(config.input_root_env)
+    if not value:
+        raise InputValidationError(
+            f"Input root environment variable `{config.input_root_env}` is not set"
+        )
+    root = Path(value).expanduser().resolve()
+    if not root.is_dir():
+        raise InputValidationError(
+            f"Input root environment variable `{config.input_root_env}` does not name a directory: "
+            f"{root}"
+        )
+    return root
+
+
+def _resolve_input_path(path: Path, input_base: Path, config: SampleConfig) -> Path:
+    if config.input_root_env is None:
+        return _resolve_path(path, input_base)
+    if path.is_absolute() or ".." in path.parts:
+        raise InputValidationError(
+            f"Inputs using `{config.input_root_env}` must be safe relative paths: {path}"
+        )
+    resolved = (input_base / path).resolve()
+    if not resolved.is_relative_to(input_base):
+        raise InputValidationError(f"Input path escapes `{config.input_root_env}` root: {path}")
+    return resolved
+
+
 def _iter_input_paths(config: SampleConfig) -> Iterable[Path]:
     yield from config.hifi_reads
     if config.kmer_reads is not None:
         yield from config.kmer_reads
     if config.reference_genome is not None:
         yield config.reference_genome
+    if config.optimization.llm_replay_transcript is not None:
+        yield config.optimization.llm_replay_transcript
 
 
 def _iter_optional_file_paths(config: SampleConfig) -> Iterable[Path]:
@@ -248,6 +319,8 @@ def _iter_optional_file_paths(config: SampleConfig) -> Iterable[Path]:
         yield from config.kmer_reads
     if config.reference_genome is not None:
         yield config.reference_genome
+    if config.optimization.llm_replay_transcript is not None:
+        yield config.optimization.llm_replay_transcript
 
 
 def _validate_outdir_does_not_contain_inputs(outdir: Path, input_paths: list[Path]) -> None:
@@ -336,21 +409,46 @@ def _write_input_checksums(config: SampleConfig, output_path: Path) -> None:
             handle.write("\n")
 
 
+def _write_input_manifest(config: SampleConfig, output_path: Path) -> None:
+    entries = [
+        {
+            "role": role,
+            "path": str(path),
+            "sha256": _sha256(path),
+            "bytes": path.stat().st_size,
+        }
+        for role, path in _iter_checksum_inputs(config)
+    ]
+    output_path.write_text(
+        json.dumps(
+            {"schema_id": "hifi-agent", "sample_id": config.sample_id, "entries": entries},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+
 def _write_validation_receipt(
     config: SampleConfig,
     resolved_config_path: Path,
     input_checksums_path: Path,
+    input_manifest_path: Path,
     output_path: Path,
 ) -> None:
     """Write a deterministic receipt proving validation outputs were materialized."""
     data = {
-        "schema_version": "1.0",
+        "schema_id": "hifi-agent",
         "status": "PASS",
         "sample_id": config.sample_id,
+        "read_technology": config.read_technology,
+        "read_technology_source": "USER_DECLARED_NOT_INFERRED",
         "resolved_config": str(resolved_config_path),
         "resolved_config_sha256": _sha256(resolved_config_path),
         "input_checksums": str(input_checksums_path),
         "input_checksums_sha256": _sha256(input_checksums_path),
+        "input_manifest": str(input_manifest_path),
+        "input_manifest_sha256": _sha256(input_manifest_path),
     }
     with output_path.open("w") as handle:
         json.dump(data, handle, indent=2, sort_keys=True)
@@ -365,6 +463,8 @@ def _iter_checksum_inputs(config: SampleConfig) -> Iterable[tuple[str, Path]]:
             yield "kmer_reads", path
     if config.reference_genome is not None:
         yield "reference_genome", config.reference_genome
+    if config.optimization.llm_replay_transcript is not None:
+        yield "llm_replay_transcript", config.optimization.llm_replay_transcript
 
 
 def _sha256(path: Path) -> str:

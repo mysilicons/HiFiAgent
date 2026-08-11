@@ -1,431 +1,826 @@
-"""Unified Stage 3 controller with real baseline/candidate execution and resume."""
+"""Single production coordinator and authoritative lifecycle state machine."""
 
 from __future__ import annotations
 
-import json
-from collections.abc import Sequence
-from datetime import UTC, datetime
+import shutil
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Protocol
+from typing import cast
 
-from pydantic import ValidationError
-
-from hifi_agent.agent.models import AssemblyConfig, PreQcMetrics
-from hifi_agent.agent.planner import Planner
-from hifi_agent.config import ConfigValidationResult, validate_config_file
-from hifi_agent.exceptions import AgentStateError, HiFiAgentError, ToolExecutionError
-from hifi_agent.executors.nextflow import run_candidate_workflow, run_phase3_workflow
-from hifi_agent.orchestration.history import AttemptHistoryStore
-from hifi_agent.orchestration.models import (
-    AssemblyEvent,
-    AssemblyRunState,
-    AssemblyState,
-    AttemptIdentity,
-    RoundRecord,
+from hifi_agent.config import verify_recorded_input_checksums
+from hifi_agent.constants import __version__
+from hifi_agent.decision.client import RecordedLLMClient, StructuredLLMClient
+from hifi_agent.decision.retrieval import LocalGovernedRetriever
+from hifi_agent.decision.rules import build_rule_directive
+from hifi_agent.decision.service import ProposalProvider, ProposalService
+from hifi_agent.exceptions import (
+    AgentStateError,
+    InterruptedExecutionError,
+    RuleEvaluationError,
+    ToolExecutionError,
 )
-from hifi_agent.orchestration.state import AssemblyStateStore, validate_assembly_transition
-from hifi_agent.qc import build_qc_feature_bundle
-from hifi_agent.rules import load_default_rule_engine, load_rule_context
-from hifi_agent.rules.models import RuleDecision
-from hifi_agent.schemas.sample import SampleConfig
+from hifi_agent.executors.assembly import AssemblyExecutor, AssemblyWorkflowRunner
+from hifi_agent.executors.models import (
+    AssemblyInputManifest,
+    AttemptCoordinate,
+    ExecutionEstimate,
+)
+from hifi_agent.executors.nextflow import (
+    NextflowAssemblyRunner,
+    assembly_inputs_from_run,
+    run_pre_qc_workflow,
+)
+from hifi_agent.orchestration.budget import BudgetLedger, BudgetLimits
+from hifi_agent.orchestration.comparison import (
+    RoundComparator,
+)
+from hifi_agent.orchestration.coordinator_models import (
+    CoordinatorFaultInjector,
+    CoordinatorResult,
+    DirectiveProvider,
+    EstimateProvider,
+    PreQcRunner,
+    ProposalServiceFactory,
+)
+from hifi_agent.orchestration.coordinator_rounds import CoordinatorRounds
+from hifi_agent.orchestration.coordinator_support import (
+    append_unique as _append_unique,
+)
+from hifi_agent.orchestration.coordinator_support import (
+    attempt_manifest_ref as _attempt_manifest_ref,
+)
+from hifi_agent.orchestration.coordinator_support import (
+    build_or_verify_qc as _build_or_verify_qc,
+)
+from hifi_agent.orchestration.coordinator_support import (
+    code_commit as _code_commit,
+)
+from hifi_agent.orchestration.coordinator_support import (
+    exclusive_copy as _exclusive_copy,
+)
+from hifi_agent.orchestration.coordinator_support import (
+    latest_attempt as _latest_attempt,
+)
+from hifi_agent.orchestration.coordinator_support import (
+    load_context as _load_context,
+)
+from hifi_agent.orchestration.coordinator_support import (
+    load_proposal_decision as _load_proposal_decision,
+)
+from hifi_agent.orchestration.coordinator_support import (
+    partial_attempt_exists as _partial_attempt_exists,
+)
+from hifi_agent.orchestration.coordinator_support import (
+    pre_qc_exists as _pre_qc_exists,
+)
+from hifi_agent.orchestration.coordinator_support import (
+    proposal_path as _proposal_path,
+)
+from hifi_agent.orchestration.coordinator_support import (
+    required_attempt as _required_attempt,
+)
+from hifi_agent.orchestration.coordinator_support import (
+    write_or_verify_json as _write_or_verify_json,
+)
+from hifi_agent.orchestration.coordinator_terminal import CoordinatorTerminal
+from hifi_agent.orchestration.environment import (
+    EnvironmentManifest,
+    materialize_environment_manifest,
+    require_environment_preflight,
+    run_environment_preflight,
+)
+from hifi_agent.orchestration.identity import IdentityStore
+from hifi_agent.orchestration.journal import StateStore
+from hifi_agent.orchestration.lock import RunLock
+from hifi_agent.orchestration.manifests import (
+    AssemblyAttemptRecord,
+    ManifestStore,
+)
+from hifi_agent.orchestration.runtime_config import (
+    DecisionMode,
+    EffectiveRuntimeConfig,
+    RuntimeConfigResult,
+    resolve_runtime_config,
+)
+from hifi_agent.orchestration.runtime_models import RunIdentity, RunPhase, RunState
+from hifi_agent.schemas.assembly import (
+    AssemblyConfig,
+    RiskLevel,
+    baseline_assembly_config,
+)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+__all__ = ["CoordinatorResult", "ProposalServiceFactory", "RunCoordinator"]
 
 
-class AssemblyTools(Protocol):
-    """Read/execute boundary for the V2 controller."""
-
-    def validate(self, config_path: Path) -> ConfigValidationResult:
-        """Validate config and inputs."""
-
-    def baseline_complete(self, config: SampleConfig) -> bool:
-        """Return whether all baseline outputs already exist."""
-
-    def execute_baseline(self, config: SampleConfig, *, resume: bool) -> None:
-        """Execute the real baseline workflow."""
-
-    def evaluate_baseline(self, run_dir: Path) -> RuleDecision:
-        """Load baseline evidence and return a rule decision without rerunning post-QC."""
-
-    def materialize_qc_features(self, config: SampleConfig) -> Path:
-        """Build or deterministically replace the cheap V2 QC feature bundle."""
-
-    def plan_candidate(self, config: SampleConfig, decision: RuleDecision) -> AssemblyConfig | None:
-        """Return the first bounded Stage 3 candidate."""
-
-    def candidate_complete(self, run_dir: Path, candidate: AssemblyConfig) -> bool:
-        """Return whether candidate assembly and metrics already exist."""
-
-    def execute_candidate(self, run_dir: Path, candidate: AssemblyConfig, *, resume: bool) -> None:
-        """Execute a real candidate and common post-QC."""
-
-    def baseline_artifacts(self, run_dir: Path) -> dict[str, Path]:
-        """Return baseline artifacts for immutable history."""
-
-    def candidate_artifacts(self, run_dir: Path, candidate: AssemblyConfig) -> dict[str, Path]:
-        """Return candidate artifacts for immutable history."""
-
-    def render_summary(self, state: AssemblyRunState) -> Path:
-        """Write the Stage 3 machine-readable summary."""
-
-
-class ExecutingAssemblyTools:
-    """Real V2 adapter: reads completed evidence and executes missing workflows."""
-
-    def __init__(self) -> None:
-        self.planner = Planner()
-
-    def validate(self, config_path: Path) -> ConfigValidationResult:
-        """Validate inputs and materialize the standard metadata receipt."""
-        return validate_config_file(config_path)
-
-    def baseline_complete(self, config: SampleConfig) -> bool:
-        """Check the complete baseline/post-QC artifact contract."""
-        artifacts = self.baseline_artifacts(config.outdir)
-        return all(
-            path.is_file() for role, path in artifacts.items() if role != "qc_feature_bundle"
-        )
-
-    def execute_baseline(self, config: SampleConfig, *, resume: bool) -> None:
-        """Run the real baseline workflow through common post-QC."""
-        run_phase3_workflow(config, resume=resume)
-
-    def evaluate_baseline(self, run_dir: Path) -> RuleDecision:
-        """Evaluate already materialized baseline evidence without rerunning tools."""
-        return load_default_rule_engine().evaluate(load_rule_context(run_dir))
-
-    def materialize_qc_features(self, config: SampleConfig) -> Path:
-        """Build the confidence-aware V2 QC feature bundle and LLM summary."""
-        build_qc_feature_bundle(config.outdir)
-        return config.outdir / "01_pre_qc/qc_feature_bundle.json"
-
-    def plan_candidate(self, config: SampleConfig, decision: RuleDecision) -> AssemblyConfig | None:
-        """Plan the first unique rule-authorized candidate for Stage 3."""
-        raw_path = config.outdir / "01_pre_qc/raw_metrics.json"
-        try:
-            pre_qc = PreQcMetrics.model_validate_json(raw_path.read_text())
-        except (OSError, ValidationError) as exc:
-            raise ToolExecutionError(f"Pre-QC metrics are invalid: {raw_path}: {exc}") from exc
-        baseline = self.planner.plan_baseline(config, pre_qc)
-        candidates = self.planner.propose_candidates(
-            decision,
-            baseline,
-            optimization_round=1,
-            max_candidates=1,
-            seen_fingerprints={baseline.parameter_fingerprint()},
-        )
-        return candidates[0] if candidates else None
-
-    def candidate_complete(self, run_dir: Path, candidate: AssemblyConfig) -> bool:
-        """Check the complete candidate/post-QC/parameter-contract artifact set."""
-        return all(path.is_file() for path in self.candidate_artifacts(run_dir, candidate).values())
-
-    def execute_candidate(self, run_dir: Path, candidate: AssemblyConfig, *, resume: bool) -> None:
-        """Run one real rule-authorized candidate through common post-QC."""
-        run_candidate_workflow(run_dir, candidate, resume=resume)
-
-    def baseline_artifacts(self, run_dir: Path) -> dict[str, Path]:
-        """Return required real baseline artifacts by stable role."""
-        return {
-            "assembly_manifest": run_dir / "02_assembly/baseline/metadata/assembly_manifest.json",
-            "primary_fasta": run_dir / "02_assembly/baseline/fasta/baseline.primary.fa",
-            "post_qc_metrics": run_dir / "03_post_qc/baseline/assembly_metrics.json",
-            "raw_metrics": run_dir / "01_pre_qc/raw_metrics.json",
-            "qc_feature_bundle": run_dir / "01_pre_qc/qc_feature_bundle.json",
-        }
-
-    def candidate_artifacts(self, run_dir: Path, candidate: AssemblyConfig) -> dict[str, Path]:
-        """Return required real candidate artifacts by stable role."""
-        return {
-            "assembly_manifest": run_dir
-            / f"02_assembly/{candidate.run_id}/metadata/assembly_manifest.json",
-            "primary_fasta": run_dir
-            / f"02_assembly/{candidate.run_id}/fasta/{candidate.run_id}.primary.fa",
-            "post_qc_metrics": run_dir / f"03_post_qc/{candidate.run_id}/assembly_metrics.json",
-            "parameter_contract": run_dir
-            / f"02_assembly/{candidate.run_id}/metadata/parameter_contract_check.json",
-        }
-
-    def render_summary(self, state: AssemblyRunState) -> Path:
-        """Render the bounded Stage 3 terminal summary once."""
-        output = state.identity.run_dir / "06_report/v2_stage3_summary.json"
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(
-            json.dumps(
-                {
-                    "schema_version": "2.0",
-                    "sample_id": state.identity.sample_id,
-                    "run_uuid": state.identity.run_uuid,
-                    "terminal_outcome": state.terminal_outcome,
-                    "decision": (state.latest_decision.decision if state.latest_decision else None),
-                    "baseline_attempt": (
-                        state.baseline_attempt.model_dump(mode="json")
-                        if state.baseline_attempt
-                        else None
-                    ),
-                    "candidate_attempt": (
-                        state.candidate_attempt.model_dump(mode="json")
-                        if state.candidate_attempt
-                        else None
-                    ),
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n"
-        )
-        return output
-
-
-class AssemblyController:
-    """Execute or resume baseline and one Stage 3 rule-authorized candidate."""
+class RunCoordinator:
+    """Own validation, execution, proposals, comparison, reporting, and recovery."""
 
     def __init__(
         self,
         config_path: Path,
-        tools: AssemblyTools,
         *,
+        decision_mode_override: DecisionMode | None = None,
         confirm_medium_high_risk: bool = False,
+        workflow_runner: AssemblyWorkflowRunner | None = None,
+        pre_qc_runner: PreQcRunner = run_pre_qc_workflow,
+        directive_provider: DirectiveProvider = build_rule_directive,
+        proposal_service_factory: ProposalServiceFactory | None = None,
+        llm_client: StructuredLLMClient | None = None,
+        fault_injector: CoordinatorFaultInjector | None = None,
+        estimate_provider: EstimateProvider | None = None,
     ) -> None:
         self.config_path = config_path.resolve()
-        preview = validate_config_file(self.config_path, write_outputs=False).config
-        self.run_dir = preview.outdir
-        self.tools = tools
+        self.decision_mode_override = decision_mode_override
         self.confirm_medium_high_risk = confirm_medium_high_risk
-        self.history = AttemptHistoryStore(self.run_dir)
-        self.store = AssemblyStateStore(self.run_dir)
-        self._config: SampleConfig | None = None
+        self.workflow_runner = workflow_runner or NextflowAssemblyRunner()
+        self.pre_qc_runner = pre_qc_runner
+        self.directive_provider = directive_provider
+        self.proposal_service_factory = proposal_service_factory
+        self.llm_client = llm_client
+        self.fault_injector = fault_injector
+        self.estimate_provider = estimate_provider
 
-    def run(self, *, resume: bool = False, max_steps: int | None = None) -> AssemblyRunState:
-        """Run to REPORT; max_steps is an internal interruption-test hook."""
-        state = self.store.load() if resume else self._initialize()
+    def run(self, *, resume: bool = False) -> CoordinatorResult:
+        """Advance or recover the single current control plane to a terminal report."""
+        preview = resolve_runtime_config(
+            self.config_path,
+            decision_mode_override=self.decision_mode_override,
+            write_outputs=False,
+        )
+        run_dir = preview.effective.sample.outdir.resolve()
+        identity_store = IdentityStore(run_dir)
         if resume:
-            self.history.load_identity(verify_config=self.config_path)
-            self.history.verify_history()
-        if state.state == AssemblyState.REPORT:
-            return state
-        steps = 0
-        while True:
-            if max_steps is not None and steps >= max_steps:
-                return state
-            state = self._step(state, resume=resume)
-            steps += 1
-            if state.state == AssemblyState.REPORT:
-                return state
+            if not identity_store.identity_path.is_file():
+                raise AgentStateError("current resume requires an existing immutable identity")
+            runtime, identity, state = self._resume(preview, identity_store)
+        else:
+            if (
+                identity_store.identity_path.exists()
+                or (run_dir / "05_agent/run_state.json").exists()
+            ):
+                raise AgentStateError("current run already exists; use --resume")
+            runtime, identity, state = self._bootstrap()
 
-    def _initialize(self) -> AssemblyRunState:
-        validation = self.tools.validate(self.config_path)
-        self._config = validation.config
-        identity = self.history.initialize(validation.config.sample_id, self.config_path)
-        state = AssemblyRunState(identity=identity, config_path=self.config_path)
-        event = AssemblyEvent(
-            sequence=1,
-            timestamp=datetime.now(UTC),
-            state_before=None,
-            state_after=AssemblyState.INPUT_VALIDATION,
-            action="INITIALIZE_V2_ASSEMBLY",
-            reason_codes=["V2_RUN_INITIALIZED"],
+        lock = RunLock(
+            run_dir,
+            run_uuid=identity.run_uuid,
+            command=["hifi-agent", "assemble", str(self.config_path)],
         )
-        self.store.initialize(state, event)
-        return state
-
-    def _step(self, state: AssemblyRunState, *, resume: bool) -> AssemblyRunState:
-        if state.state == AssemblyState.INPUT_VALIDATION:
-            self._config = self.tools.validate(self.config_path).config
-            return self._transition(
-                state,
-                AssemblyState.BASELINE_EXECUTION,
-                "VALIDATE_INPUT",
-                ["INPUT_VALIDATION_PASSED"],
-            )
-        if state.state == AssemblyState.BASELINE_EXECUTION:
-            return self._baseline(state, resume=resume)
-        if state.state == AssemblyState.BASELINE_EVALUATION:
-            return self._evaluate(state)
-        if state.state == AssemblyState.CANDIDATE_EXECUTION:
-            return self._candidate(state, resume=resume)
-        raise AgentStateError(f"No handler for V2 assembly state: {state.state}")
-
-    def _baseline(self, state: AssemblyRunState, *, resume: bool) -> AssemblyRunState:
-        config = self._load_config()
-        attempt = self.history.begin_attempt(
-            kind="baseline",
-            round_index=0,
-            retry=state.tool_retry_counts.get("baseline", 0) > 0,
-        )
-        state.baseline_attempt = attempt
-        if not self.history.is_complete(attempt):
-            try:
-                if not self.tools.baseline_complete(config):
-                    self.tools.execute_baseline(config, resume=resume)
-                self.tools.materialize_qc_features(config)
-                self.history.complete_attempt(
-                    attempt,
-                    artifacts=self.tools.baseline_artifacts(self.run_dir),
-                )
-            except (HiFiAgentError, OSError) as exc:
-                return self._tool_failure(state, "baseline", attempt, exc)
-        return self._transition(
-            state,
-            AssemblyState.BASELINE_EVALUATION,
-            "COMPLETE_BASELINE_WORKFLOW",
-            ["BASELINE_AND_POST_QC_AVAILABLE"],
-            run_id="baseline",
-            attempt=attempt,
-        )
-
-    def _evaluate(self, state: AssemblyRunState) -> AssemblyRunState:
-        decision = self.tools.evaluate_baseline(self.run_dir)
-        state.latest_decision = decision
-        if decision.decision != "RETRY":
-            state.terminal_outcome = (
-                "ACCEPTED_BASELINE" if decision.decision == "BASELINE" else "STOP_RULE_DECISION"
-            )
-            self.history.record_round(
-                RoundRecord(
-                    round_index=0,
-                    incumbent_before="baseline",
-                    candidate_run_ids=[],
-                    attempt_ids=[
-                        state.baseline_attempt.attempt_id if state.baseline_attempt else ""
-                    ],
-                    outcome=state.terminal_outcome,
-                    incumbent_after=(
-                        "baseline" if state.terminal_outcome == "ACCEPTED_BASELINE" else None
-                    ),
-                    stop_reason=decision.action,
-                )
-            )
-            return self._finish(state, decision.reason_codes)
-        candidate = self.tools.plan_candidate(self._load_config(), decision)
-        if candidate is None:
-            state.terminal_outcome = "STOP_NO_LEGAL_CANDIDATE"
-            return self._finish(state, ["NO_LEGAL_CANDIDATE"])
-        if candidate.requires_user_confirmation and not self.confirm_medium_high_risk:
-            state.candidate_config = candidate
-            state.terminal_outcome = "STOP_CONFIRMATION_REQUIRED"
-            return self._finish(state, ["CANDIDATE_CONFIRMATION_REQUIRED"])
-        state.candidate_config = candidate
-        self.history.record_round(
-            RoundRecord(
-                round_index=0,
-                incumbent_before="baseline",
-                candidate_run_ids=[candidate.run_id],
-                attempt_ids=[state.baseline_attempt.attempt_id if state.baseline_attempt else ""],
-                outcome="RETRY_AUTHORIZED",
-                incumbent_after="baseline",
-            )
-        )
-        return self._transition(
-            state,
-            AssemblyState.CANDIDATE_EXECUTION,
-            "PLAN_RULE_AUTHORIZED_CANDIDATE",
-            decision.reason_codes,
-            run_id=candidate.run_id,
-        )
-
-    def _candidate(self, state: AssemblyRunState, *, resume: bool) -> AssemblyRunState:
-        candidate = state.candidate_config
-        if candidate is None:
-            raise AgentStateError("Candidate execution state has no candidate config")
-        attempt = self.history.begin_attempt(
-            kind="candidate",
-            round_index=1,
-            candidate_index=1,
-            retry=state.tool_retry_counts.get("candidate", 0) > 0,
-        )
-        state.candidate_attempt = attempt
-        if not self.history.is_complete(attempt):
-            try:
-                if not self.tools.candidate_complete(self.run_dir, candidate):
-                    self.tools.execute_candidate(self.run_dir, candidate, resume=resume)
-                self.history.complete_attempt(
-                    attempt,
-                    artifacts=self.tools.candidate_artifacts(self.run_dir, candidate),
-                    parameter_fingerprint=candidate.parameter_fingerprint(),
-                )
-            except (HiFiAgentError, OSError) as exc:
-                return self._tool_failure(state, "candidate", attempt, exc)
-        state.terminal_outcome = "CANDIDATE_EXECUTED_STAGE3"
-        self.history.record_round(
-            RoundRecord(
-                round_index=1,
-                incumbent_before="baseline",
-                candidate_run_ids=[candidate.run_id],
-                attempt_ids=[attempt.attempt_id],
-                outcome=state.terminal_outcome,
-                incumbent_after=None,
-                stop_reason="STAGE3_COMPARISON_DEFERRED_TO_STAGE8",
-            )
-        )
-        return self._finish(state, ["CANDIDATE_AND_POST_QC_AVAILABLE"])
-
-    def _tool_failure(
-        self,
-        state: AssemblyRunState,
-        step: str,
-        attempt: AttemptIdentity,
-        error: Exception,
-    ) -> AssemblyRunState:
-        config = self._load_config()
-        count = state.tool_retry_counts.get(step, 0)
-        state.last_error = str(error)
+        lock.acquire(takeover_stale=resume)
         try:
-            self.history.complete_attempt(
-                attempt,
-                artifacts={},
-                status="FAILED",
-                error=str(error),
-            )
-        except AgentStateError:
-            pass
-        if count < config.agent.max_tool_retries:
-            state.tool_retry_counts[step] = count + 1
-            return self._transition(
-                state,
-                state.state,
-                "RETRY_TOOL_FAILURE",
-                ["TOOL_FAILURE", "TOOL_RETRY_WITHOUT_PARAMETER_CHANGE"],
-                run_id=attempt.run_id,
-                attempt=attempt,
-            )
-        state.terminal_outcome = "STOP_TOOL_FAILURE"
-        return self._finish(state, ["TOOL_RETRY_BUDGET_EXCEEDED"])
+            try:
+                return self._advance(runtime, identity, state)
+            except InterruptedExecutionError:
+                raise
+            except ToolExecutionError as exc:
+                current = StateStore(run_dir).load()
+                return self._enter_reporting(
+                    current,
+                    outcome="FAILED_TOOL",
+                    outcome_class="FAILED",
+                    reason_codes=["TOOL_EXECUTION_FAILED"],
+                    last_error=str(exc),
+                )
+            except RuleEvaluationError as exc:
+                current = StateStore(run_dir).load()
+                required = runtime.effective.optimization.require_llm
+                return self._enter_reporting(
+                    current,
+                    outcome=("FAILED_REQUIRED_LLM" if required else "STOP_INSUFFICIENT_EVIDENCE"),
+                    outcome_class=("FAILED" if required else "SCIENTIFIC"),
+                    reason_codes=[
+                        "REQUIRED_DECISION_SERVICE_FAILED"
+                        if required
+                        else "OPTIONAL_DECISION_EVIDENCE_FAILED"
+                    ],
+                    last_error=str(exc),
+                )
+            except AgentStateError as exc:
+                if "budget exhausted" not in str(exc).lower():
+                    raise
+                current = StateStore(run_dir).load()
+                return self._enter_reporting(
+                    current,
+                    outcome="STOP_BUDGET",
+                    outcome_class="ACTION_REQUIRED",
+                    reason_codes=["PRELAUNCH_BUDGET_EXHAUSTED"],
+                    last_error=str(exc),
+                )
+        finally:
+            lock.release()
 
-    def _finish(self, state: AssemblyRunState, reasons: Sequence[str]) -> AssemblyRunState:
-        state.report_path = self.tools.render_summary(state)
-        return self._transition(
-            state,
-            AssemblyState.REPORT,
-            "RENDER_STAGE3_SUMMARY",
-            list(reasons) or ["TERMINAL_OUTCOME_RECORDED"],
+    def _bootstrap(self) -> tuple[RuntimeConfigResult, RunIdentity, RunState]:
+        runtime = resolve_runtime_config(
+            self.config_path,
+            decision_mode_override=self.decision_mode_override,
+            write_outputs=True,
         )
+        sample = runtime.effective.sample
+        environment = run_environment_preflight(sample)
+        require_environment_preflight(environment)
+        environment_path = materialize_environment_manifest(
+            environment,
+            sample.outdir / "00_metadata/environment_manifest.json",
+        )
+        policy_path = sample.outdir / "04_decisions/comparison_policy_snapshot.yaml"
+        rag_path = sample.outdir / "04_decisions/rag_index_snapshot.json"
+        _exclusive_copy(PROJECT_ROOT / "configs/comparison_policy.yaml", policy_path)
+        _exclusive_copy(PROJECT_ROOT / "knowledge/index.json", rag_path)
+        identity = RunIdentity.create(
+            sample_id=sample.sample_id,
+            run_dir=sample.outdir,
+            code_commit=_code_commit(),
+            package_version=__version__,
+            config=runtime.validation.resolved_config,
+            effective_config=runtime.effective_config_path,
+            input_manifest=runtime.validation.input_manifest,
+            environment_manifest=environment_path,
+            comparison_policy=policy_path,
+            rag_index=rag_path,
+        )
+        IdentityStore(sample.outdir).initialize(identity)
+        state = StateStore(sample.outdir).initialize(identity)
+        BudgetLedger(sample.outdir).initialize(
+            BudgetLimits.from_config(runtime.effective.execution_budget)
+        )
+        ManifestStore(sample.outdir).initialize_history()
+        return runtime, identity, state
 
-    def _transition(
+    def _resume(
         self,
-        state: AssemblyRunState,
-        target: AssemblyState,
-        action: str,
-        reasons: list[str],
-        *,
-        run_id: str | None = None,
-        attempt: AttemptIdentity | None = None,
-    ) -> AssemblyRunState:
-        before = state.state
-        validate_assembly_transition(before, target)
-        state.state = target
-        event = AssemblyEvent(
-            sequence=state.transition_sequence + 1,
-            timestamp=datetime.now(UTC),
-            state_before=before,
-            state_after=target,
-            action=action,
-            reason_codes=reasons,
-            run_id=run_id,
-            attempt_id=attempt.attempt_id if attempt else None,
-        )
-        self.store.persist_transition(state, event)
-        return state
+        preview: RuntimeConfigResult,
+        identity_store: IdentityStore,
+    ) -> tuple[RuntimeConfigResult, RunIdentity, RunState]:
+        identity = identity_store.verify_snapshots(write_drift_receipt=True)
+        try:
+            persisted = EffectiveRuntimeConfig.model_validate_json(
+                preview.effective_config_path.read_text()
+            )
+        except (OSError, ValueError) as exc:
+            raise AgentStateError(f"Persisted effective current config is invalid: {exc}") from exc
+        if persisted != preview.effective:
+            raise AgentStateError(
+                "Resume config or CLI override differs from immutable current config"
+            )
+        verify_recorded_input_checksums(identity.run_dir / "00_metadata/input_checksums.tsv")
+        state = StateStore(identity.run_dir).load()
+        BudgetLedger(identity.run_dir).snapshot()
+        ManifestStore(identity.run_dir).verify()
+        return preview, identity, state
 
-    def _load_config(self) -> SampleConfig:
-        if self._config is None:
-            self._config = validate_config_file(self.config_path, write_outputs=False).config
-        return self._config
+    def _advance(
+        self,
+        runtime: RuntimeConfigResult,
+        identity: RunIdentity,
+        state: RunState,
+    ) -> CoordinatorResult:
+        run_dir = identity.run_dir
+        state_store = StateStore(run_dir)
+        budget = BudgetLedger(run_dir)
+        manifests = ManifestStore(run_dir)
+        comparator = RoundComparator(run_dir / "04_decisions/comparison_policy_snapshot.yaml")
+        inputs: AssemblyInputManifest | None = None
+        executor: AssemblyExecutor | None = None
+
+        while True:
+            if state.state == RunPhase.TERMINAL:
+                return self._terminal_result(state)
+            if state.state in {RunPhase.REPORTING, RunPhase.VERIFYING}:
+                return self._finish_reporting(state)
+            if state.state == RunPhase.INITIALIZING:
+                state = state_store.transition(
+                    state,
+                    RunPhase.INPUT_VALIDATION,
+                    action="ACCEPT_VALIDATED_INPUT",
+                    reason_codes=["INPUT_RECEIPT_VERIFIED"],
+                )
+                continue
+            if state.state == RunPhase.INPUT_VALIDATION:
+                state = state_store.transition(
+                    state,
+                    RunPhase.ENVIRONMENT_PREFLIGHT,
+                    action="ACCEPT_ENVIRONMENT_PREFLIGHT",
+                    reason_codes=["ENVIRONMENT_MANIFEST_BOUND"],
+                )
+                continue
+            if state.state == RunPhase.ENVIRONMENT_PREFLIGHT:
+                state = state_store.transition(
+                    state,
+                    RunPhase.PRE_QC,
+                    action="START_PRE_QC",
+                    reason_codes=["PRE_QC_START"],
+                )
+                continue
+            if state.state == RunPhase.PRE_QC:
+                self._fault("before_pre_qc", state)
+                inputs = self.pre_qc_runner(
+                    runtime.effective.sample,
+                    resume=_pre_qc_exists(run_dir),
+                )
+                self._fault("after_pre_qc", state)
+                state = state_store.transition(
+                    state,
+                    RunPhase.BASELINE_PLAN,
+                    action="COMPLETE_PRE_QC",
+                    reason_codes=["PRE_QC_INVENTORY_VERIFIED"],
+                )
+                continue
+            inputs = inputs or assembly_inputs_from_run(run_dir)
+            executor = executor or AssemblyExecutor(
+                run_dir,
+                sample=runtime.effective.sample,
+                inputs=inputs,
+                environment_manifest_sha256=identity.environment_manifest_sha256,
+                budget=budget,
+                manifests=manifests,
+                runner=self.workflow_runner,
+            )
+            baseline_config = baseline_assembly_config(
+                reads=runtime.effective.sample.hifi_reads,
+                threads=runtime.effective.sample.resources.max_threads,
+            )
+            if state.state == RunPhase.BASELINE_PLAN:
+                state = state_store.transition(
+                    state,
+                    RunPhase.BASELINE_ASSEMBLY,
+                    action="APPROVE_BASELINE_CONFIG",
+                    reason_codes=["BASELINE_FULL_CONFIG_APPROVED"],
+                    updates={"active_attempt_id": "baseline.attempt_001"},
+                )
+                continue
+            if state.state == RunPhase.BASELINE_ASSEMBLY:
+                record = _latest_attempt(run_dir, AttemptCoordinate(round_index=0))
+                if record is None:
+                    self._fault("before_baseline_attempt", state)
+                    record = executor.execute(
+                        coordinate=AttemptCoordinate(round_index=0),
+                        requested_config=baseline_config.model_dump(mode="json"),
+                        approved_config=baseline_config,
+                        resume=_partial_attempt_exists(
+                            run_dir,
+                            AttemptCoordinate(round_index=0),
+                        ),
+                        estimate=self._estimate(AttemptCoordinate(round_index=0), run_dir),
+                    )
+                    if record is None:
+                        raise InterruptedExecutionError(
+                            "Baseline attempt was interrupted; rerun with --resume"
+                        )
+                    self._fault("after_baseline_attempt", state)
+                if not record.comparison_eligible:
+                    outcome = (
+                        "FAILED_PARAMETER_CONTRACT"
+                        if record.status == "CONTRACT_VIOLATION"
+                        else "FAILED_TOOL"
+                    )
+                    return self._enter_reporting(
+                        state,
+                        outcome=outcome,
+                        outcome_class="FAILED",
+                        reason_codes=list(record.ineligible_reason_codes),
+                        last_error=record.error,
+                    )
+                executor.verify_completed_attempt(record)
+                manifest_ref = _attempt_manifest_ref(run_dir, record)
+                state = state_store.transition(
+                    state,
+                    RunPhase.BASELINE_POST_QC,
+                    action="COMPLETE_BASELINE_ATTEMPT",
+                    reason_codes=["BASELINE_ATTEMPT_COMPLETE"],
+                    updates={
+                        "baseline_run_ref": manifest_ref,
+                        "incumbent_run_ref": manifest_ref,
+                        "seen_parameter_fingerprints": [baseline_config.parameter_fingerprint()],
+                        "active_attempt_id": None,
+                    },
+                )
+                continue
+            if state.state == RunPhase.BASELINE_POST_QC:
+                baseline_record = _required_attempt(run_dir, state.baseline_run_ref)
+                qc_path = run_dir / "04_decisions/round_00/qc_feature_bundle.json"
+                _build_or_verify_qc(
+                    qc_path,
+                    run_dir,
+                    baseline_record,
+                    runtime.effective.sample,
+                )
+                state = state_store.transition(
+                    state,
+                    RunPhase.BASELINE_REVIEW,
+                    action="BUILD_BASELINE_QC_FEATURES",
+                    reason_codes=["BASELINE_REVIEW_READY"],
+                    updates={"latest_decision_ref": qc_path.relative_to(run_dir)},
+                )
+                continue
+            if state.state == RunPhase.BASELINE_REVIEW:
+                state = self._rounds().review_baseline(
+                    state,
+                    runtime=runtime,
+                    comparator=comparator,
+                    manifests=manifests,
+                )
+                if state.state == RunPhase.REPORTING:
+                    return self._finish_reporting(state)
+                continue
+            if state.state == RunPhase.ROUND_CONTEXT:
+                context = self._rounds().round_context(state, runtime, identity, comparator, budget)
+                context_path = (
+                    run_dir
+                    / "04_decisions"
+                    / f"round_{state.round_index:02d}"
+                    / "decision_context.json"
+                )
+                state = state_store.transition(
+                    state,
+                    RunPhase.RAG_RETRIEVAL,
+                    action="FREEZE_ROUND_CONTEXT",
+                    reason_codes=["CURRENT_INCUMBENT_CONTEXT_HASHED"],
+                    updates={"latest_decision_ref": context_path.relative_to(run_dir)},
+                )
+                continue
+            if state.state == RunPhase.RAG_RETRIEVAL:
+                context = _load_context(run_dir, state.round_index)
+                directive = self.directive_provider(context)
+                provider = self._proposal_provider(run_dir, budget, runtime)
+                self._fault("before_proposal", state)
+                provider.propose_run(
+                    context,
+                    directive,
+                    decision_mode=runtime.effective.optimization.decision_mode,
+                    require_llm=runtime.effective.optimization.require_llm,
+                    max_candidates=runtime.effective.optimization.max_candidates_per_round,
+                    confirm_medium_high_risk=self.confirm_medium_high_risk,
+                    client=self._configured_llm_client(runtime),
+                )
+                self._fault("after_proposal", state)
+                state = state_store.transition(
+                    state,
+                    RunPhase.LLM_PROPOSAL,
+                    action="COMPLETE_GOVERNED_RETRIEVAL",
+                    reason_codes=["RAG_TRACE_FROZEN"],
+                )
+                continue
+            if state.state == RunPhase.LLM_PROPOSAL:
+                decision = _load_proposal_decision(run_dir, state.round_index)
+                reason = (
+                    "LLM_PROPOSAL_RECORDED"
+                    if decision.llm_receipt.status != "NOT_CALLED"
+                    else "LLM_PROPOSAL_EXPLICITLY_SKIPPED"
+                )
+                state = state_store.transition(
+                    state,
+                    RunPhase.SAFETY_REVIEW,
+                    action="COMPLETE_PROPOSAL_PROVIDER",
+                    reason_codes=[reason],
+                )
+                continue
+            if state.state == RunPhase.SAFETY_REVIEW:
+                decision = _load_proposal_decision(run_dir, state.round_index)
+                seen = list(state.seen_parameter_fingerprints)
+                for approved in decision.approved:
+                    if approved.parameter_fingerprint not in seen:
+                        seen.append(approved.parameter_fingerprint)
+                if decision.approved:
+                    state = state_store.transition(
+                        state,
+                        RunPhase.BUDGET_RESERVATION,
+                        action="ACCEPT_SAFETY_APPROVED_CANDIDATES",
+                        reason_codes=list(decision.reason_codes),
+                        updates={
+                            "candidate_index": 1,
+                            "seen_parameter_fingerprints": seen,
+                            "latest_decision_ref": _proposal_path(
+                                run_dir, state.round_index
+                            ).relative_to(run_dir),
+                        },
+                    )
+                else:
+                    state = state_store.transition(
+                        state,
+                        RunPhase.ROUND_COMPARISON,
+                        action="NO_EXECUTABLE_CANDIDATE",
+                        reason_codes=list(decision.reason_codes),
+                        updates={
+                            "candidate_index": None,
+                            "seen_parameter_fingerprints": seen,
+                            "latest_decision_ref": _proposal_path(
+                                run_dir, state.round_index
+                            ).relative_to(run_dir),
+                        },
+                    )
+                continue
+            if state.state == RunPhase.BUDGET_RESERVATION:
+                decision = _load_proposal_decision(run_dir, state.round_index)
+                candidate_index = state.candidate_index or 1
+                approved = decision.approved[candidate_index - 1]
+                attempt_id = (
+                    f"round_{state.round_index:02d}_candidate_{candidate_index:02d}.attempt_001"
+                )
+                state = state_store.transition(
+                    state,
+                    RunPhase.CANDIDATE_ASSEMBLY,
+                    action="RESERVE_CANDIDATE_LAUNCH",
+                    reason_codes=["CANDIDATE_PRELAUNCH_BUDGET_CHECK"],
+                    updates={"active_attempt_id": attempt_id},
+                )
+                del approved
+                continue
+            if state.state == RunPhase.CANDIDATE_ASSEMBLY:
+                decision = _load_proposal_decision(run_dir, state.round_index)
+                active_candidate_index = state.candidate_index
+                if active_candidate_index is None or active_candidate_index > len(
+                    decision.approved
+                ):
+                    raise AgentStateError(
+                        "Candidate state does not match the approved proposal set"
+                    )
+                approved = decision.approved[active_candidate_index - 1]
+                coordinate = AttemptCoordinate(
+                    round_index=state.round_index,
+                    candidate_index=active_candidate_index,
+                )
+                record = self._execute_candidate(
+                    executor,
+                    coordinate,
+                    approved.full_config,
+                    requested=cast(Mapping[str, object], approved.approved_diff),
+                    max_retries=runtime.effective.execution_budget.max_tool_retries,
+                    state=state,
+                    run_dir=run_dir,
+                )
+                if record.status == "CONTRACT_VIOLATION":
+                    return self._enter_reporting(
+                        state,
+                        outcome="FAILED_PARAMETER_CONTRACT",
+                        outcome_class="FAILED",
+                        reason_codes=list(record.ineligible_reason_codes),
+                        last_error=record.error,
+                    )
+                state = state_store.transition(
+                    state,
+                    RunPhase.CANDIDATE_POST_QC,
+                    action=(
+                        "COMPLETE_CANDIDATE_ATTEMPT"
+                        if record.comparison_eligible
+                        else "FINALIZE_FAILED_CANDIDATE"
+                    ),
+                    reason_codes=(
+                        ["CANDIDATE_ATTEMPT_COMPLETE"]
+                        if record.comparison_eligible
+                        else list(record.ineligible_reason_codes)
+                    ),
+                    updates={"active_attempt_id": None},
+                )
+                continue
+            if state.state == RunPhase.CANDIDATE_POST_QC:
+                decision = _load_proposal_decision(run_dir, state.round_index)
+                post_qc_candidate_index = state.candidate_index
+                if post_qc_candidate_index is None:
+                    raise AgentStateError("Candidate post-QC state lacks candidate_index")
+                record = _latest_attempt(
+                    run_dir,
+                    AttemptCoordinate(
+                        round_index=state.round_index,
+                        candidate_index=post_qc_candidate_index,
+                    ),
+                )
+                if record is None:
+                    raise AgentStateError("Candidate post-QC lacks a finalized attempt")
+                if record.comparison_eligible:
+                    qc_path = (
+                        run_dir
+                        / "04_decisions"
+                        / f"round_{state.round_index:02d}"
+                        / f"candidate_{post_qc_candidate_index:02d}"
+                        / "qc_feature_bundle.json"
+                    )
+                    _build_or_verify_qc(
+                        qc_path,
+                        run_dir,
+                        record,
+                        runtime.effective.sample,
+                    )
+                if post_qc_candidate_index < len(decision.approved):
+                    next_index = post_qc_candidate_index + 1
+                    state = state_store.transition(
+                        state,
+                        RunPhase.CANDIDATE_ASSEMBLY,
+                        action="RESERVE_NEXT_CANDIDATE_LAUNCH",
+                        reason_codes=["NEXT_CANDIDATE_PRELAUNCH_BUDGET_CHECK"],
+                        updates={
+                            "candidate_index": next_index,
+                            "active_attempt_id": (
+                                f"round_{state.round_index:02d}_candidate_{next_index:02d}.attempt_001"
+                            ),
+                        },
+                    )
+                else:
+                    state = state_store.transition(
+                        state,
+                        RunPhase.ROUND_COMPARISON,
+                        action="COMPLETE_ROUND_CANDIDATE_SET",
+                        reason_codes=["ALL_APPROVED_CANDIDATES_FINALIZED"],
+                        updates={"candidate_index": None, "active_attempt_id": None},
+                    )
+                continue
+            if state.state == RunPhase.ROUND_COMPARISON:
+                state = self._rounds().compare_round(
+                    state,
+                    runtime=runtime,
+                    comparator=comparator,
+                    manifests=manifests,
+                )
+                if state.state == RunPhase.REPORTING:
+                    return self._finish_reporting(state)
+                continue
+            if state.state == RunPhase.INCUMBENT_UPDATE:
+                state = self._rounds().after_incumbent_update(state, runtime)
+                if state.state == RunPhase.REPORTING:
+                    return self._finish_reporting(state)
+                continue
+            raise AgentStateError(f"Unsupported current coordinator phase: {state.state.value}")
+
+    def _proposal_provider(
+        self,
+        run_dir: Path,
+        budget: BudgetLedger,
+        runtime: RuntimeConfigResult,
+    ) -> ProposalProvider:
+        levels = {
+            cast(RiskLevel, item)
+            for item in runtime.effective.optimization_policy().confirmation_risk_levels
+        }
+        if self.proposal_service_factory is not None:
+            return self.proposal_service_factory(run_dir, budget, levels)
+        environment = EnvironmentManifest.model_validate_json(
+            (run_dir / "00_metadata/environment_manifest.json").read_text()
+        )
+        hifiasm = next(item for item in environment.tools if item.name == "hifiasm")
+        version = hifiasm.version or "UNKNOWN"
+        return ProposalService(
+            run_dir,
+            budget=budget,
+            retriever=LocalGovernedRetriever(
+                run_dir / "04_decisions/rag_index_snapshot.json",
+                actual_hifiasm_version=version,
+            ),
+            confirmation_risk_levels=levels,
+        )
+
+    def _configured_llm_client(
+        self,
+        runtime: RuntimeConfigResult,
+    ) -> StructuredLLMClient | None:
+        """Select an injected client, an immutable recorded replay, or the live default."""
+        if self.llm_client is not None:
+            return self.llm_client
+        transcript = runtime.effective.optimization.llm_replay_transcript
+        return RecordedLLMClient(transcript) if transcript is not None else None
+
+    def _execute_candidate(
+        self,
+        executor: AssemblyExecutor,
+        coordinate: AttemptCoordinate,
+        config: AssemblyConfig,
+        *,
+        requested: Mapping[str, object],
+        max_retries: int,
+        state: RunState,
+        run_dir: Path,
+    ) -> AssemblyAttemptRecord:
+        record = _latest_attempt(run_dir, coordinate)
+        while True:
+            if record is not None and record.comparison_eligible:
+                executor.verify_completed_attempt(record)
+                return record
+            if record is not None and record.status == "CONTRACT_VIOLATION":
+                return record
+            retry = record is not None
+            if record is not None and record.attempt_index - 1 >= max_retries:
+                return record
+            partial = record is None and _partial_attempt_exists(run_dir, coordinate)
+            self._fault("before_candidate_attempt", state)
+            result = executor.execute(
+                coordinate=coordinate,
+                requested_config=requested,
+                approved_config=config,
+                resume=partial,
+                retry=retry,
+                estimate=self._estimate(coordinate, run_dir),
+            )
+            if result is None:
+                raise InterruptedExecutionError(
+                    f"{coordinate.logical_run_id} interrupted; rerun with --resume"
+                )
+            record = result
+            self._fault("after_candidate_attempt", state)
+
+    def _transition_to_reporting(
+        self,
+        state: RunState,
+        *,
+        outcome: str,
+        outcome_class: str,
+        reason_codes: list[str],
+        last_error: str | None = None,
+        updates: dict[str, object] | None = None,
+    ) -> RunState:
+        payload = {
+            "terminal_outcome": outcome,
+            "outcome_class": outcome_class,
+            "terminal_reason_codes": reason_codes,
+            "last_error": last_error,
+            "candidate_index": None,
+            "active_attempt_id": None,
+            **(updates or {}),
+        }
+        return StateStore(state.identity.run_dir).transition(
+            state,
+            RunPhase.REPORTING,
+            action="ENTER_TERMINAL_REPORTING",
+            reason_codes=reason_codes,
+            updates=payload,
+        )
+
+    def _enter_reporting(
+        self,
+        state: RunState,
+        *,
+        outcome: str,
+        outcome_class: str,
+        reason_codes: list[str],
+        last_error: str | None = None,
+    ) -> CoordinatorResult:
+        if state.state not in {RunPhase.REPORTING, RunPhase.VERIFYING, RunPhase.TERMINAL}:
+            updates: dict[str, object] | None = None
+            proposal_path = _proposal_path(state.identity.run_dir, state.round_index)
+            round_manifest_path = (
+                state.identity.run_dir
+                / "04_decisions"
+                / f"round_{state.round_index:02d}"
+                / "round_manifest.json"
+            )
+            if (
+                state.round_index > 0
+                and proposal_path.is_file()
+                and not round_manifest_path.exists()
+            ):
+                decision = _load_proposal_decision(state.identity.run_dir, state.round_index)
+                stop_path = round_manifest_path.parent / "terminal_stop.json"
+                _write_or_verify_json(
+                    stop_path,
+                    {
+                        "schema_id": "hifi-agent",
+                        "terminal_outcome": outcome,
+                        "outcome_class": outcome_class,
+                        "reason_codes": reason_codes,
+                    },
+                )
+                round_path = self._rounds().round_manifest(
+                    state,
+                    decision,
+                    manifests=ManifestStore(state.identity.run_dir),
+                    comparison_path=stop_path,
+                    incumbent_after=cast(Path, state.incumbent_run_ref),
+                    round_outcome=outcome,
+                    reasons=reason_codes,
+                )
+                updates = {
+                    "completed_round_refs": _append_unique(
+                        state.completed_round_refs,
+                        round_path.relative_to(state.identity.run_dir),
+                    )
+                }
+            state = self._transition_to_reporting(
+                state,
+                outcome=outcome,
+                outcome_class=outcome_class,
+                reason_codes=reason_codes,
+                last_error=last_error,
+                updates=updates,
+            )
+        return self._finish_reporting(state)
+
+    def _finish_reporting(self, state: RunState) -> CoordinatorResult:
+        return CoordinatorTerminal(self._fault).finish(state)
+
+    def _rounds(self) -> CoordinatorRounds:
+        return CoordinatorRounds(
+            transition_to_reporting=self._transition_to_reporting,
+            fault=self._fault,
+        )
+
+    def _terminal_result(self, state: RunState) -> CoordinatorResult:
+        return CoordinatorTerminal(self._fault).result(state)
+
+    def _estimate(self, coordinate: AttemptCoordinate, run_dir: Path) -> ExecutionEstimate:
+        if self.estimate_provider is not None:
+            return self.estimate_provider(coordinate)
+        free_gib = shutil.disk_usage(run_dir).free / (1024**3)
+        return ExecutionEstimate(observed_free_gib=free_gib)
+
+    def _fault(self, hook: str, state: RunState) -> None:
+        if self.fault_injector is not None:
+            self.fault_injector(hook, state)

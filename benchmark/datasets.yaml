@@ -1,124 +1,38 @@
-# Dataset registry for HiFi Agent benchmarks.
-# Large data must be downloaded outside Git and referenced by local path or accession.
-
-version: 1.0.0
-updated: "2026-07-14"
-
+schema_id: "hifi-agent"
+registry_id: real-acceptance-datasets
 datasets:
-  - id: candida_albicans_srr23724250
-    role: retained_real_acceptance
-    status: validated_local_run
-    description: >
-      Public Candida albicans PacBio HiFi reads retained as a local Stage 2-12
-      acceptance run. The FASTQ header records SRR23724250 and the reference
-      header records CP128823.1. Large inputs and tool databases are not in Git.
-    source_type: public_archive
-    organism: Candida albicans
-    read_accession: SRR23724250
-    reference_accession: CP128823.1
-    expected_genome_size_bp: 14500000
+  - dataset_id: drosophila_melanogaster_srr33554835
+    species: Drosophila melanogaster
+    taxon_id: 7227
+    read_technology: pacbio_hifi
+    accession: SRR33554835
+    source_uri: https://www.ncbi.nlm.nih.gov/sra/SRR33554835
+    source_archive: NCBI Sequence Read Archive
+    usage_policy: >-
+      NCBI places no restrictions on use or distribution of molecular database data;
+      submitter-originated rights, if any, remain the user's responsibility.
+    usage_policy_uri: https://www.ncbi.nlm.nih.gov/home/about/policies/
+    approved_usage:
+      - local assembly acceptance
+      - reproducible scientific comparison
+      - aggregate quality reporting
+    locator:
+      root_env: HIFI_AGENT_DATA_ROOT
+      relative_path: Drosophila_melanogaster/Drosophila_melanogaster_HiFi.fastq
+    bytes: 34915862206
+    sha256: 38d859e526bd8ded49c3daea9a0211fb7bd7eb328773740ae1ebca98338c1d4d
+    read_count: 2430495
+    total_bases: 17357574041
+    expected_genome_size: 180000000
+    expected_genome_size_source: >-
+      National Academies/NCBI Bookshelf table and text report approximately 180 Mb:
+      https://www.ncbi.nlm.nih.gov/books/NBK225678/
     ploidy: 2
-    input_sha256: cde62d7e3754ca81fdd24c902f2f4b3beaa0814932015e57527486bdf365e8c1
-    reference_sha256: 32d5d3189a4813f0f095393de325c124f65712ad6376dc5ac7e38bd304e19b64
-    retained_run: results/Candida_albicans_phase6
-    target_use:
-      - real workflow acceptance
-      - rules and RAG comparison
-      - public report demonstration
-    provenance_note: >
-      Accessions were verified from retained FASTQ/reference headers. Live NCBI
-      metadata lookup timed out on 2026-07-14 and is not represented as revalidated.
+    inbred: null
+    reference: null
+    busco_lineage: diptera_odb12
     limitations:
-      - The safe STOP/REVIEW outcome is an expected Agent success.
-      - Stage 11 candidate metrics are separately marked synthetic.
-
-  - id: synthetic_micro_hifi
-    role: tiny_public_test
-    status: selected_for_stage_0
-    description: >
-      A tiny synthetic PacBio HiFi-like FASTQ generated from a small artificial
-      eukaryotic-style reference. This is intended for parser, schema, and
-      workflow smoke tests, not biological benchmarking.
-    source_type: generated_fixture
-    public_shareable: true
-    expected_size: tiny
-    target_use:
-      - input validation
-      - seqkit parser tests
-      - NanoPlot parser tests
-      - Nextflow smoke tests
-    generation_plan:
-      reference_size_bp: 50000
-      read_count: 200
-      mean_read_length_bp: 12000
-      expected_qscore: 30
-      random_seed: 20260625
-    limitations:
-      - Not a biological truth set.
-      - Not suitable for hifiasm quality claims.
-      - Not suitable for BUSCO, QUAST, or Merqury biological interpretation.
-
-  - id: giab_hg002_pacbio_hifi
-    role: real_benchmark
-    status: candidate_needs_download_validation
-    description: >
-      Genome in a Bottle HG002/NA24385 PacBio HiFi data. This is the preferred
-      real benchmark candidate because it is public, deeply characterized, and
-      widely used for human genome benchmarking.
-    source_type: public_archive
-    organism: Homo sapiens
-    sample_id: HG002
-    expected_genome_size_bp: 3100000000
-    ploidy: 2
-    inbred: false
-    busco_lineage: primates_odb12
-    kmer_source_plan: same_data_advisory_or_independent_if_short_reads_added
-    target_use:
-      - baseline hifiasm behavior
-      - post-QC parser validation
-      - conservative rule-engine benchmark
-      - reporting demonstration
-    local_storage_policy:
-      commit_to_git: false
-      store_under: /data/gw/code/HiFiAgent_data/benchmarks/giab_hg002_pacbio_hifi
-    download_notes:
-      - Verify exact read accession or GIAB FTP path before download.
-      - Record checksum, source URL, and download date in run metadata.
-      - Use a downsampled subset only for routine local smoke tests.
-    limitations:
-      - Human HiFi datasets are large and require substantial compute.
-      - Full benchmark execution may exceed routine development time.
-      - Source accession must be rechecked before automated download scripts are added.
-
-benchmark_scenarios:
-  - id: candida_albicans_srr23724250
-    dataset: candida_albicans_srr23724250
-    expected_behavior: reproduce_retained_safe_review_decision
-  - id: normal_hifi
-    dataset: giab_hg002_pacbio_hifi
-    expected_behavior: accept_baseline_or_keep_default_without_unnecessary_retry
-  - id: low_coverage
-    dataset: giab_hg002_pacbio_hifi
-    perturbation: downsample_reads
-    expected_behavior: warn_or_stop_without_blind_parameter_search
-  - id: assembly_size_too_large
-    dataset: synthetic_metric_fixture
-    expected_behavior: propose_whitelisted_purge_candidate_only_if_duplication_signal_agrees
-  - id: hom_cov_conflict
-    dataset: synthetic_metric_fixture
-    expected_behavior: propose_hom_cov_candidate_only_with_trusted_coverage_peak
-  - id: conflicting_metrics
-    dataset: synthetic_metric_fixture
-    expected_behavior: stop_uncertain_or_require_manual_review
-  - id: inbred_sample
-    dataset: synthetic_metric_fixture
-    expected_behavior: allow_one_bounded_l0_candidate_without_forcing_acceptance
-  - id: high_n50_structural_error
-    dataset: synthetic_metric_fixture
-    expected_behavior: constrain_retry_and_never_select_on_n50_alone
-  - id: tool_failure
-    dataset: synthetic_metric_fixture
-    expected_behavior: stop_as_engineering_failure_not_biological_failure
-  - id: insufficient_evidence
-    dataset: synthetic_metric_fixture
-    expected_behavior: stop_without_forced_tuning
+      - The local FASTQ header establishes the accession but retained download transport logs are unavailable.
+      - Merqury uses the assembly reads and is therefore advisory rather than independent validation.
+      - Reference-based misassembly metrics are not applicable because no matching sample reference is frozen.
+      - The expected genome size is a species estimate rather than a sample-specific measurement.

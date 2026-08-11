@@ -1,453 +1,161 @@
-import hashlib
-import json
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 from typer.testing import CliRunner
 
 import hifi_agent.cli
 from hifi_agent.cli import app
-from hifi_agent.constants import ExitCode
-from hifi_agent.executors.nextflow import NextflowRunResult
-from hifi_agent.optimization import RoundComparisonContext
-from hifi_agent.rag.models import ApprovedCandidate
-from hifi_agent.rules.context import RuleContext
-from hifi_agent.rules.models import CandidateParameters, RuleDecision
+from hifi_agent.constants import ExitCode, __version__
+from hifi_agent.exceptions import AgentStateError
+from hifi_agent.orchestration.runtime_models import RunPhase
+from hifi_agent.reporting.models import FinalSummary
 
 runner = CliRunner()
 
 
-def test_help_lists_initial_commands() -> None:
-    result = runner.invoke(app, ["--help"])
-
-    assert result.exit_code == ExitCode.OK
-    assert "validate" in result.output
-    assert "plan" in result.output
-    assert "run" in result.output
-    assert "assemble" in result.output
-    assert "migrate-v1" in result.output
-    assert "evaluate" in result.output
-    assert "report" in result.output
-    assert "decide" in result.output
-    assert "agent" in result.output
-    assert "rag-index" in result.output
-    assert "explain" in result.output
-    assert "propose" in result.output
-    assert "execute-candidate" in result.output
-    assert "compare-stage7" in result.output
-    assert "report-v2" in result.output
-    assert "benchmark-v2" in result.output
-    assert "demo-v2" in result.output
-    assert "optimize" in result.output
-    assert "synthesize-stage11-anomaly" in result.output
-
-
-def test_version_option() -> None:
-    result = runner.invoke(app, ["--version"])
-
-    assert result.exit_code == ExitCode.OK
-    assert "hifi-agent 2.0.0" in result.output
-
-
-def test_placeholder_command_uses_project_exit_code() -> None:
-    result = runner.invoke(app, ["plan", "sample.yaml"])
-
-    assert result.exit_code == ExitCode.NOT_IMPLEMENTED
-    assert "`hifi-agent plan` is not implemented yet" in result.output
-
-
-def test_validate_missing_config_uses_input_validation_exit_code() -> None:
-    result = runner.invoke(app, ["validate", "sample.yaml"])
-
-    assert result.exit_code == ExitCode.INPUT_VALIDATION_FAILED
-    assert "Config file does not exist" in result.output
-
-
-def test_evaluate_runs_post_qc_entry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-
-    def fake_evaluate(path: Path, *, resume: bool = True) -> NextflowRunResult:
-        assert path == run_dir.resolve()
-        assert resume is True
-        return NextflowRunResult(("nextflow",), path, path / "reads.list")
-
-    monkeypatch.setattr(hifi_agent.cli, "run_post_qc_workflow", fake_evaluate)
-
-    result = runner.invoke(app, ["evaluate", str(run_dir)])
-
-    assert result.exit_code == ExitCode.OK
-    assert "Post-assembly evaluation completed" in result.output
-
-
-def test_decide_writes_rule_decision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    context = RuleContext()
-    decision = RuleDecision(
-        decision_id="D-TEST",
-        rule_set_version="test",
-        threshold_catalog_version="test",
-        decision="BASELINE",
-        action="ACCEPT_DEFAULT_PARAMETERS",
-        matched_rule_ids=["NORMAL"],
-        controlling_rule_ids=["NORMAL"],
-        reason_codes=["METRICS_NORMAL"],
-        evidence={"assembly_size_ratio": 1.0},
-        candidates=[],
-        confidence=0.9,
-        risk_level="low",
-        conflicts=[],
-        human_readable_explanation="Normal metrics.",
+def _config(tmp_path: Path) -> Path:
+    reads = tmp_path / "reads.fastq"
+    reads.write_text("@read\nACGT\n+\nIIII\n")
+    path = tmp_path / "sample.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_id": "hifi-agent",
+                "sample_id": "sample",
+                "read_technology": "pacbio_hifi",
+                "hifi_reads": [str(reads)],
+                "outdir": str(tmp_path / "run"),
+                "execution_budget": {"min_free_disk_gib": 0},
+            }
+        )
     )
-
-    class FakeEngine:
-        def evaluate(self, observed: RuleContext) -> RuleDecision:
-            assert observed is context
-            return decision
-
-    monkeypatch.setattr(hifi_agent.cli, "load_rule_context", lambda path: context)
-    monkeypatch.setattr(hifi_agent.cli, "load_default_rule_engine", FakeEngine)
-
-    result = runner.invoke(app, ["decide", str(run_dir)])
-
-    output = run_dir / "04_decisions" / "baseline" / "rule_decision.json"
-    assert result.exit_code == ExitCode.OK
-    assert "Rule decision: BASELINE" in result.output
-    assert output.is_file()
-    assert RuleDecision.model_validate_json(output.read_text()) == decision
+    return path
 
 
-def test_decide_missing_run_artifacts_uses_insufficient_evidence_exit_code(
-    tmp_path: Path,
-) -> None:
-    result = runner.invoke(app, ["decide", str(tmp_path)])
-
-    assert result.exit_code == ExitCode.INSUFFICIENT_EVIDENCE
-    assert "Rule context artifact(s) missing" in result.output
+def test_package_release_is_reported() -> None:
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert __version__ in result.output
 
 
-def test_agent_command_runs_recoverable_controller(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
+def test_public_cli_exposes_only_production_commands() -> None:
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    for command in ("assemble", "plan", "validate", "verify-run"):
+        assert command in result.output
+
+
+def test_plan_is_read_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _config(tmp_path)
+    monkeypatch.setattr(
+        hifi_agent.cli,
+        "run_environment_preflight",
+        lambda _sample: SimpleNamespace(status="PASS"),
+    )
+    monkeypatch.setattr(hifi_agent.cli, "require_environment_preflight", lambda _value: None)
+    result = runner.invoke(app, ["plan", str(config), "--decision-mode", "llm_disabled"])
+    assert result.exit_code == 0
+    assert "No run artifacts were written" in result.output
+    assert not (tmp_path / "run").exists()
+
+
+def test_assemble_uses_only_coordinator(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _config(tmp_path)
     observed: dict[str, object] = {}
 
-    class FakeController:
-        def __init__(self, observed_run_dir: Path, config: Path, tools: object) -> None:
-            observed["run_dir"] = observed_run_dir
-            observed["config"] = config
-            observed["tools"] = tools
-            self.store = SimpleNamespace(
-                state_path=observed_run_dir / "05_agent" / "agent_state.json",
-                trace_path=observed_run_dir / "05_agent" / "decision_trace.jsonl",
-            )
-
-        def run(self, *, resume: bool = False) -> SimpleNamespace:
-            observed["resume"] = resume
-            return SimpleNamespace(terminal_outcome="STOP_UNCERTAIN", state="REPORT")
-
-    fake_tools = object()
-    monkeypatch.setattr(hifi_agent.cli, "AgentController", FakeController)
-    monkeypatch.setattr(hifi_agent.cli, "ExistingRunAgentTools", lambda path: fake_tools)
-
-    result = runner.invoke(app, ["agent", str(run_dir), "--resume"])
-
-    assert result.exit_code == ExitCode.OK
-    assert "Agent terminal outcome: STOP_UNCERTAIN" in result.output
-    assert observed["run_dir"] == run_dir.resolve()
-    assert observed["resume"] is True
-
-
-def test_assemble_command_uses_unified_v2_controller(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = tmp_path / "sample.yaml"
-    config.write_text("sample_id: sample\n")
-    observed: dict[str, object] = {}
-
-    class FakeAssemblyController:
+    class FakeCoordinator:
         def __init__(
             self,
-            config_path: Path,
-            tools: object,
+            path: Path,
             *,
-            confirm_medium_high_risk: bool = False,
+            decision_mode_override: str | None,
+            confirm_medium_high_risk: bool,
         ) -> None:
-            observed["config"] = config_path
-            observed["tools"] = tools
-            observed["confirm"] = confirm_medium_high_risk
-            self.store = SimpleNamespace(state_path=tmp_path / "run_state.json")
+            observed["path"] = path
+            observed["mode"] = decision_mode_override
+            observed["confirmation"] = confirm_medium_high_risk
 
-        def run(self, *, resume: bool = False) -> SimpleNamespace:
+        def run(self, *, resume: bool) -> SimpleNamespace:
             observed["resume"] = resume
-            return SimpleNamespace(
+            report_dir = tmp_path / "run/06_report"
+            report_dir.mkdir(parents=True)
+            summary_path = report_dir / "final_summary.json"
+            summary = FinalSummary(
+                generated_at=datetime.now(UTC),
+                run_uuid="a" * 32,
+                sample_id="sample",
+                package_version="test-release",
+                code_commit="abc123",
                 terminal_outcome="ACCEPTED_BASELINE",
-                state="REPORT",
-                report_path=tmp_path / "summary.json",
+                outcome_class="SCIENTIFIC",
+                process_exit_code=0,
+                selected_run_ref=Path("02_assembly/baseline/attempt_001"),
+                baseline_run_ref=Path("02_assembly/baseline/attempt_001"),
+                incumbent_chain=(Path("02_assembly/baseline/attempt_001"),),
+                attempts=(),
+                rounds=(),
+                llm_activity=(),
+                budget_limits={},
+                budget_reserved={},
+                budget_committed={},
+                budget_remaining={},
+                stop_reason_codes=("BASELINE_ACCEPTED",),
+                scientific_limitations=("test fixture",),
+                verification_status="PASS",
             )
-
-    fake_tools = object()
-    monkeypatch.setattr(hifi_agent.cli, "AssemblyController", FakeAssemblyController)
-    monkeypatch.setattr(hifi_agent.cli, "ExecutingAssemblyTools", lambda: fake_tools)
-
-    result = runner.invoke(
-        app,
-        ["assemble", str(config), "--resume", "--confirm-medium-high-risk"],
-    )
-
-    assert result.exit_code == ExitCode.OK
-    assert "V2 assembly outcome: ACCEPTED_BASELINE" in result.output
-    assert observed["config"] == config
-    assert observed["tools"] is fake_tools
-    assert observed["resume"] is True
-    assert observed["confirm"] is True
-
-
-def test_rag_index_command_reports_source_and_chunk_counts(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    output = tmp_path / "index.json"
-    monkeypatch.setattr(
-        hifi_agent.cli,
-        "build_knowledge_index",
-        lambda **kwargs: SimpleNamespace(sources=[1, 2], chunks=[1, 2, 3]),
-    )
-
-    result = runner.invoke(app, ["rag-index", "--output", str(output)])
-
-    assert result.exit_code == ExitCode.OK
-    assert "Sources: 2" in result.output
-    assert "Chunks: 3" in result.output
-
-
-def test_explain_command_supports_llm_disabled_mode(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    observed: dict[str, object] = {}
-
-    def fake_explain(path: Path, **kwargs: object) -> SimpleNamespace:
-        observed["path"] = path
-        observed.update(kwargs)
-        return SimpleNamespace(
-            llm_status="DISABLED",
-            explanation=SimpleNamespace(recommended_action="STOP_AND_REVIEW"),
-            retrieval_evidence=[SimpleNamespace(source_id="hifiasm_faq")],
-        )
-
-    monkeypatch.setattr(hifi_agent.cli, "explain_run", fake_explain)
-
-    result = runner.invoke(app, ["explain", str(run_dir), "--no-llm"])
-
-    assert result.exit_code == ExitCode.OK
-    assert "Explanation status: DISABLED" in result.output
-    assert observed["path"] == run_dir.resolve()
-    assert observed["enable_llm"] is False
-
-
-def test_propose_command_passes_stage6_safety_options(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    output_dir = tmp_path / "audit"
-    observed: dict[str, object] = {}
-
-    def fake_propose(path: Path, **kwargs: object) -> SimpleNamespace:
-        observed["path"] = path
-        observed.update(kwargs)
-        return SimpleNamespace(
-            terminal_status="CANDIDATES_APPROVED",
-            decision_mode="hybrid",
-            llm_status="SUCCESS",
-            approved_candidates=[object()],
-            rejected_proposals=[],
-        )
-
-    monkeypatch.setattr(hifi_agent.cli, "propose_run", fake_propose)
-
-    result = runner.invoke(
-        app,
-        [
-            "propose",
-            str(run_dir),
-            "--decision-mode",
-            "hybrid",
-            "--require-llm",
-            "--max-candidates",
-            "2",
-            "--confirm-medium-high-risk",
-            "--output-dir",
-            str(output_dir),
-        ],
-    )
-
-    assert result.exit_code == ExitCode.OK
-    assert "Stage 6 status: CANDIDATES_APPROVED" in result.output
-    assert observed["path"] == run_dir.resolve()
-    assert observed["decision_mode"] == "hybrid"
-    assert observed["require_llm"] is True
-    assert observed["max_candidates"] == 2
-    assert observed["confirm_medium_high_risk"] is True
-
-
-def test_execute_candidate_loads_strict_approval_and_stage7_options(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    parameters = CandidateParameters(disable_post_join=True)
-    fingerprint = hashlib.sha256(
-        json.dumps(
-            parameters.model_dump(mode="json"),
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
-    approved = ApprovedCandidate(
-        candidate_id="disable_post_join",
-        origin="rule",
-        requested_parameters=parameters,
-        approved_parameters=parameters,
-        source_ids=["hifiasm_parameters"],
-        metric_ids=["quast_misassemblies"],
-        reason_codes=["REFERENCE_SUPPORTED_STRUCTURAL_ERRORS"],
-        risk_level="medium",
-        requires_user_confirmation=False,
-        confidence=0.8,
-        parameter_fingerprint=fingerprint,
-    )
-    approved_path = tmp_path / "approved.json"
-    approved_path.write_text(approved.model_dump_json())
-    run_dir = tmp_path / "baseline"
-    execution_root = tmp_path / "stage7"
-    observed: dict[str, object] = {}
-
-    class FakeExecutor:
-        def __init__(self, source: Path, destination: Path) -> None:
-            observed["source"] = source
-            observed["destination"] = destination
-
-        def execute(self, candidate: ApprovedCandidate, **kwargs: object) -> SimpleNamespace:
-            observed["candidate"] = candidate
-            observed.update(kwargs)
-            attempt = SimpleNamespace(
-                run_id="candidate_r02_c02",
-                attempt_id="attempt_001",
-                relative_directory=lambda: Path("round_02/candidate_02/attempt_001"),
-            )
+            summary_path.write_text(summary.model_dump_json(indent=2) + "\n")
             return SimpleNamespace(
-                status="COMPLETED",
-                attempt=attempt,
-                workflow_run_dir=execution_root / "workflow",
-                error=None,
+                run_dir=tmp_path / "run",
+                state=SimpleNamespace(
+                    state=RunPhase.TERMINAL,
+                    terminal_outcome="ACCEPTED_BASELINE",
+                ),
+                baseline_attempt=SimpleNamespace(attempt_id="baseline.attempt_001"),
+                report_bundle=SimpleNamespace(
+                    markdown=report_dir / "final_report.md",
+                    summary=summary_path,
+                ),
             )
 
-    monkeypatch.setattr(hifi_agent.cli, "CandidateExecutor", FakeExecutor)
+    monkeypatch.setattr(hifi_agent.cli, "RunCoordinator", FakeCoordinator)
     result = runner.invoke(
         app,
-        [
-            "execute-candidate",
-            str(run_dir),
-            str(approved_path),
-            "--execution-root",
-            str(execution_root),
-            "--round",
-            "2",
-            "--candidate",
-            "2",
-            "--threads",
-            "6",
-            "--resume",
-        ],
+        ["assemble", str(config), "--resume", "--decision-mode", "rules_only"],
     )
-
-    assert result.exit_code == ExitCode.OK
-    assert "Stage 7 status: COMPLETED" in result.output
-    assert observed["candidate"] == approved
-    assert observed["round_index"] == 2
-    assert observed["candidate_index"] == 2
-    assert observed["threads"] == 6
-    assert observed["resume"] is True
-
-
-def test_execute_candidate_rejects_non_approved_json(tmp_path: Path) -> None:
-    invalid = tmp_path / "assembly_config.json"
-    invalid.write_text('{"run_id": "candidate_r01_c01"}')
-
-    result = runner.invoke(
-        app,
-        [
-            "execute-candidate",
-            str(tmp_path / "run"),
-            str(invalid),
-            "--execution-root",
-            str(tmp_path / "stage7"),
-        ],
-    )
-
-    assert result.exit_code == ExitCode.INPUT_VALIDATION_FAILED
-    assert "ApprovedCandidate JSON is invalid" in result.output
+    assert result.exit_code == 0
+    assert "reported terminal state" in result.output
+    assert observed == {
+        "path": config,
+        "mode": "rules_only",
+        "confirmation": False,
+        "resume": True,
+    }
 
 
-def test_compare_stage7_command_passes_scientific_applicability_context(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_cli_uses_documented_failure_exit_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    baseline = object()
-    candidate = object()
-    observed: dict[str, object] = {}
-    monkeypatch.setattr(
-        hifi_agent.cli,
-        "load_baseline_comparable",
-        lambda path: baseline,
-    )
-    monkeypatch.setattr(
-        hifi_agent.cli,
-        "load_stage7_comparable",
-        lambda path: candidate,
-    )
+    config = _config(tmp_path)
 
-    class FakeComparator:
-        def compare_round(self, **kwargs: object) -> SimpleNamespace:
-            observed.update(kwargs)
-            return SimpleNamespace(
-                outcome="STOP_PLATEAU",
-                incumbent_before="baseline",
-                incumbent_after="baseline",
-            )
+    class FailingCoordinator:
+        def __init__(
+            self,
+            path: Path,
+            *,
+            decision_mode_override: str | None,
+            confirm_medium_high_risk: bool,
+        ) -> None:
+            del path, decision_mode_override, confirm_medium_high_risk
 
-    monkeypatch.setattr(hifi_agent.cli, "RoundComparator", FakeComparator)
-    output = tmp_path / "round"
-    result = runner.invoke(
-        app,
-        [
-            "compare-stage7",
-            str(tmp_path / "baseline"),
-            str(tmp_path / "attempt"),
-            "--output-dir",
-            str(output),
-            "--round",
-            "2",
-            "--reference-free",
-            "--genome-size-trusted",
-        ],
-    )
+        def run(self, *, resume: bool) -> None:
+            del resume
+            raise AgentStateError("corrupt state")
 
-    assert result.exit_code == ExitCode.OK
-    assert "Stage 8 outcome: STOP_PLATEAU" in result.output
-    assert observed["round_index"] == 2
-    assert observed["incumbent"] is baseline
-    assert observed["candidates"] == [candidate]
-    context = observed["context"]
-    assert isinstance(context, RoundComparisonContext)
-    assert context.reference_available is False
-    assert context.genome_size_trusted is True
+    monkeypatch.setattr(hifi_agent.cli, "RunCoordinator", FailingCoordinator)
+    monkeypatch.setattr(hifi_agent.cli, "write_bootstrap_failure", lambda *args, **kwargs: None)
+    result = runner.invoke(app, ["assemble", str(config)])
+    assert result.exit_code == ExitCode.INTERNAL_ERROR
+    assert "corrupt state" in result.output

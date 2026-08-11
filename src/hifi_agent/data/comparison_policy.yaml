@@ -1,5 +1,5 @@
-schema_version: "2.0"
-policy_version: "2.0.0"
+schema_id: "hifi-agent"
+policy_id: default-comparison-policy
 
 metrics:
   assembly_size_ratio:

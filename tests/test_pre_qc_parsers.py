@@ -1,6 +1,7 @@
 import json
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -167,6 +168,49 @@ def test_parse_genomescope_stdout_and_report(tmp_path: Path) -> None:
     assert parsed["error_rate"] == 0.00877
     assert parsed["model_fit"] == 1.35
     assert parsed["repeat_fraction"] == pytest.approx(0.1335, rel=0.01)
+
+
+def test_run_genomescope_prefers_declared_genomescope2_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    histogram = tmp_path / "hist.tsv"
+    histogram.write_text("1\t1\n")
+    output_dir = tmp_path / "genomescope"
+    summary = tmp_path / "summary.tsv"
+    observed_command: list[str] = []
+    monkeypatch.setattr(
+        "hifi_agent.workflow_tools.shutil.which",
+        lambda command: "/declared/bin/genomescope2" if command == "genomescope2" else None,
+    )
+
+    def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        del kwargs
+        observed_command.extend(command)
+        return SimpleNamespace(returncode=0, stdout="GenomeScope complete", stderr="")
+
+    monkeypatch.setattr("hifi_agent.workflow_tools.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "workflow_tools",
+            "run-genomescope",
+            "--histogram",
+            str(histogram),
+            "--k",
+            "21",
+            "--output-dir",
+            str(output_dir),
+            "--summary",
+            str(summary),
+        ],
+    )
+
+    workflow_tools_main()
+
+    assert observed_command[0] == "/declared/bin/genomescope2"
+    assert "Rscript" not in observed_command
+    assert summary.is_file()
 
 
 def test_parse_hifiasm_log_finds_threshold_and_resource_summary(tmp_path: Path) -> None:

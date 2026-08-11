@@ -1,408 +1,181 @@
-# HiFi Agent V2
+# HiFi Agent V3
 
-HiFi Agent 是一个面向单样本 PacBio HiFi 真核基因组组装的受控分析助手。它把输入验证、组装前质控、hifiasm 组装、组装后评价、专家规则决策、有限候选比较和最终报告组织成可重复的命令行流程。
+HiFi Agent V3 是面向单样本 PacBio HiFi 的受约束组装助手。当前代码是原生 V3 实现：只接受
+`schema_id: "hifi-agent"`，只写 canonical V3 run，不包含旧版本控制器、Schema、迁移器、导出器或
+兼容执行入口。
 
-项目的核心目标是：在可审计的边界内帮助用户判断一次 HiFi-only 组装是否足够可靠，或者是否需要停止复核、有限重试或生成解释报告。V2 最多运行三轮、每轮默认一个候选。规则和 Safety Arbiter 是执行授权的权威；可选 LLM 可基于净化后的结构化证据提出白名单内的 typed candidate，但不能授权参数、执行 shell、绕过预算或改变停止结论。
+当前已实现并严格验收阶段 0～8：
 
-## 功能特性
+- 原生 V3 配置、环境预检、不可变 run identity、事务状态日志、单写者锁和统一预算；
+- pre-QC 与 baseline 通过公开 `assemble` 的唯一 `RunCoordinator`；
+- baseline/candidate 共用 `AssemblyExecutor`、同一 Nextflow entry 和同一 post-QC contract；
+- attempt 内六件套参数契约、独立 work/publish/cache、inventory、完成 marker 和 retry/resume 语义；
+- typed `DecisionContext`、governed RAG、可选结构化 LLM、单参数 Safety Arbiter、incumbent overlay、
+  全局指纹去重和完整 proposal lineage；
+- `assemble` 自动完成 baseline review、最多三轮/每轮最多两个候选、受保护多指标比较、plateau、
+  budget、human-review 和失败终态；
+- 每个终态自动生成 Markdown、JSON、run/parameter/provenance TSV 和 deep verification report；
+- attempt/Nextflow cache 恢复、完成后故障恢复、单写者并发拒绝、账本幂等和损坏闭锁均有 portable
+  破坏性测试。
+- executable fixture 通过真实 CLI 子进程和磁盘边界完成 baseline + 三轮 candidate、round 2 resume、
+  recorded LLM replay，以及退出码 `0/3/4/5` 和报告一致性验收。
 
-- 单样本 PacBio HiFi FASTQ / FASTQ.GZ 输入验证。
-- Nextflow DSL2 本地工作流，覆盖 pre-QC、k-mer 分析、hifiasm baseline 组装和 post-QC。
-- 结构化解析 seqkit、NanoPlot、GenomeScope、QUAST、BUSCO、Merqury、mapping QC 和 hifiasm 日志。
-- 基于版本化 YAML 规则的 `BASELINE`、`RETRY`、`STOP` 决策。
-- 受预算限制的候选组装比较，只允许安全白名单参数。
-- Markdown、JSON、TSV 等可读和可机器处理的报告产物。
-- 可选 RAG/LLM 层，用于带来源的解释和受 Schema 约束的候选提议。
-- 最多三轮的单变量优先优化、Pareto 冲突停止和参数—argv—报告追踪。
-- 无需测序数据的 V2 便携 demo，可快速验证安装、比较策略和停止逻辑。
+## 环境
 
-## 适用范围
-
-HiFi Agent V2 支持：
-
-- 单个样本的一组或多组 PacBio HiFi reads。
-- 真核基因组 HiFi-only contig 组装。
-- 二倍体样本优先的保守评价流程，以及最多三轮的受控候选闭环。
-- Linux 本地执行。
-- CLI 优先的可重复运行。
-
-V2 不支持：
-
-- Hi-C 分相组装。
-- trio / parental reads 分型。
-- ONT ultra-long 辅助组装。
-- 染色体级 scaffolding。
-- 基因组注释或重复注释。
-- 无边界参数搜索。
-- 由 LLM 直接执行任意命令或决定参数。
-
-## 安装
-
-完整生物学工作流推荐使用 Conda 环境。该环境包含 Python、Nextflow、Java 和主要生物信息学工具。
-Git remote（规范远程仓库）为 `https://github.com/mysilicons/HiFiAgent.git`。
+项目要求 Python 3.12。推荐使用仓库环境文件：
 
 ```bash
-git clone https://github.com/mysilicons/HiFiAgent.git
-cd HiFiAgent
-
 conda env create -f environment.yml
 conda activate hifiAgent
-python -m pip install -e .
-
-hifi-agent --version
+python -m pip install -e '.[dev]'
 ```
 
-完整工作流需要 Linux。若只运行便携 demo，可以只使用 Python 3.12 虚拟环境：
+真实执行还要求环境预检中列出的 Nextflow、Java、hifiasm、gfatools、SeqKit、NanoPlot、meryl、
+QUAST、BUSCO、Merqury、minimap2、samtools、coverage backend、R 和 GenomeScope 工具。
+
+## 五分钟 portable quickstart
+
+以下命令不需要大型数据或付费 API。它会在指定目录安装独立的 fixture 可执行工具副本，并由真实
+`python -m hifi_agent assemble` 子进程完成 baseline 和三轮优化；测试套件会执行完全相同的入口。
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
-hifi-agent demo-v2 /tmp/hifi-agent-v2-demo
+python scripts/run_portable_demo.py --workspace /tmp/hifi-agent-portable --scenario three-rounds
 ```
 
-## 快速开始
+成功时脚本自身退出 `0`，输出 JSON 中的 `exit_codes` 为 `[0]`，run 的
+`06_report/final_summary.json` 为 `STOP_MAX_ROUNDS`。这只证明生产 wiring 可移植，不代表真实生物
+数据质量；真实数据和 live LLM 属于阶段 9。
 
-下面是 V2 十分钟 quickstart。它不下载或伪造生物数据，只验证安装后的生产 Schema、随 wheel 分发的比较策略、`RoundComparator` 和五个安全结论：
+## Drosophila 真实验收
 
-```bash
-hifi-agent --version
-hifi-agent demo-v2 /tmp/hifi-agent-v2-demo
-sed -n '1,160p' /tmp/hifi-agent-v2-demo/v2_portable_demo.md
-```
+阶段 9 已提供 `configs/drosophila_real_acceptance.yaml`、版本化 dataset registry、真实 run
+verifier、release-only pytest suite、live provider smoke 和 evidence builder。配置通过
+`HIFI_AGENT_DATA_ROOT` 定位未提交 Git 的 34.9 GB FASTQ，固定使用 128 线程并把内存上限设为
+960 GB。完整的预下载、启动、恢复、日志和最终验收命令见
+[阶段 9 验收报告](docs/v3/stage9_acceptance.md)。run2 已完成真实 baseline、单变量 candidate、同源
+post-QC 和 comparison，deep/real verifier 均 PASS，科学结论为 `KEEP_INCUMBENT / STOP_PLATEAU`。
+但 run2 未绑定 clean commit，且 live API、0-skip real suite 和 evidence bundle 尚未通过，因此阶段状态为
+`RUN2_SCIENTIFIC_PASS_RELEASE_BLOCKED`；最终发布证据必须由 clean commit 上的 run3 产生。
 
-预期报告中包含：
-
-```text
-Scenarios passed: 5/5
-```
-
-该 demo 的 JSON 明确记录 `biological_data_used: false`，因此只能作为安装和安全逻辑检查，不能作为生物学验收。真实 Candida 和 Drosophila 验收见 [V2 发布说明](docs/releases/v2.0.0.md)。
-
-## 配置样本
-
-复制示例配置并修改为自己的样本路径：
-
-```bash
-cp examples/candida_sample_config.yaml sample.yaml
-```
-
-配置示例：
+## 配置示例：
 
 ```yaml
-sample_id: My_sample
+schema_id: "hifi-agent"
+sample_id: candida
+read_technology: pacbio_hifi
 hifi_reads:
-  - /absolute/path/to/reads.fastq.gz
-outdir: /absolute/path/to/results/My_sample
-species_name: Example species
-expected_genome_size: 14500000
-ploidy: 2
-busco_lineage: saccharomycetes_odb12
-kmer_reads: null
-reference_genome: null
+  - /absolute/path/reads.fastq.gz
+outdir: /absolute/path/results/candida
 
 resources:
-  max_threads: 64
-  max_memory_gb: 256
-
-agent:
-  max_retry_rounds: 1
-  max_candidates_per_round: 2
-  max_tool_retries: 1
-  max_cpu_hours: 10000
-  max_walltime_hours: 168
-  objective: balanced
+  max_threads: 32
+  max_memory_gb: 128
 
 optimization:
+  enabled: true
   max_rounds: 3
   max_candidates_per_round: 1
-  allow_multi_parameter_candidates: false
+  max_parameter_changes_per_candidate: 1
+  decision_mode: rules_only
+  require_llm: false
+  retain_all_attempts: true
 
-kmer:
-  k: 21
-  low_coverage_peak_threshold: 10.0
-
-mapping_qc:
-  min_read_length: 1000
-  min_mean_qscore: 20.0
-  coverage_window_size: 10000
+execution_budget:
+  max_total_assemblies: 4
+  max_tool_retries: 1
+  max_cpu_hours: 1000
+  max_walltime_hours: 168
+  min_free_disk_gib: 100
+  max_llm_calls_per_round: 1
+  max_total_llm_calls: 3
 ```
 
-如果 HiFi reads 和参考 genome 文件放在同一个数据目录中，可以直接分别指向这两个文件。例如：
+`examples/candida_sample_config.yaml` 提供仓库内示例。`plan` 是只读操作，不创建 run：
 
-```text
-Data/Candida_albicans/
-├── Candida_albicans_HiFi.fastq
-├── Candida_albicans_gnome.fasta
-└── hifiAgent/
-    └── Candida_albicans_config.yaml
+```bash
+hifi-agent plan examples/candida_sample_config.yaml
 ```
 
-此时配置文件位于 `hifiAgent/` 子目录，路径应写成：
-
-```yaml
-hifi_reads:
-  - ../Candida_albicans_HiFi.fastq
-reference_genome: ../Candida_albicans_gnome.fasta
-outdir: .
-```
-
-相对路径会以配置文件所在目录为基准解析；不要再额外写一层重复的数据目录名。
-
-常用字段说明：
-
-| 字段 | 说明 |
-| --- | --- |
-| `sample_id` | 样本 ID，只允许字母、数字、下划线和短横线 |
-| `hifi_reads` | HiFi FASTQ / FASTQ.GZ 输入，可以是一条路径或路径列表 |
-| `outdir` | 当前样本的结果目录 |
-| `expected_genome_size` | 预期基因组大小，单位 bp |
-| `busco_lineage` | BUSCO lineage；缺失时可由 BUSCO 自动推断 |
-| `kmer_reads` | 可选独立 k-mer reads；缺失时复用 `hifi_reads` 并标记为 advisory |
-| `reference_genome` | 可选参考基因组，用于 reference-based 评价 |
-| `resources` | 本次运行允许使用的线程和内存上限 |
-| `agent` | 候选比较预算和目标偏好 |
-
-## 运行流程
-
-### 1. 验证输入
+## 命令
 
 ```bash
 hifi-agent validate sample.yaml
+hifi-agent plan sample.yaml --decision-mode rules_only
+hifi-agent assemble sample.yaml --decision-mode rules_only
+hifi-agent assemble sample.yaml --decision-mode rules_only --resume
+hifi-agent verify-run /path/to/results/sample --deep
 ```
 
-验证会检查配置 schema、输入路径、FASTQ/GZIP 基本完整性、资源预算和禁止字段，并写入：
+决策模式为 `rules_only`、`llm_disabled` 或 `hybrid`。只有 `hybrid` 可使用 LLM，且
+`require_llm: true` 只允许与 `hybrid` 同时配置。在线 API key 只从环境变量读取，不写入 run、日志或
+报告。高级离线审计可在 `hybrid` 下配置 checksummed `llm_replay_transcript`；它按 round 绑定响应，
+仍经过同一个 Schema 和 Safety Arbiter。
+
+高级 CLI 选项在 `--help` 中标为 `Advanced`。V2 命令与别名已删除，不提供 deprecated 兼容入口；
+旧 run 也不会由 V3 读取或迁移。
+
+## Canonical attempt
 
 ```text
-<outdir>/00_metadata/resolved_config.yaml
-<outdir>/00_metadata/input_checksums.tsv
-<outdir>/00_metadata/validation_receipt.json
+02_assembly/baseline/attempt_001/
+├── metadata/
+├── contract/
+│   ├── requested_config.json
+│   ├── approved_config.json
+│   ├── rendered_argv.json
+│   ├── hifiasm_command.txt
+│   ├── realized_parameters.json
+│   └── parameter_contract_check.json
+├── workflow/
+├── assembly/
+├── post_qc/
+├── artifacts_manifest.json
+├── attempt_manifest.json
+└── COMPLETED.json
 ```
 
-### 2. 运行 baseline 组装和质控
+中断恢复复用同一 attempt 和 Nextflow cache；确定性工具失败重试创建新的 `attempt_NNN`。没有完成
+marker、inventory 漂移或参数契约失败的 attempt 永远不能进入比较。
 
-```bash
-hifi-agent run --resume sample.yaml
-```
+## Canonical terminal reports
 
-该命令会运行验证后的 Nextflow 工作流，生成组装前 QC、k-mer 指标、hifiasm baseline 组装和组装后 QC 结果。中断后可继续使用 `--resume` 复用 Nextflow 缓存。
-
-### 3. 单独重新执行组装后评价
-
-如果已有 baseline 组装结果，可单独重新评价：
-
-```bash
-hifi-agent evaluate /absolute/path/to/results/My_sample
-```
-
-### 4. 运行专家规则决策
-
-```bash
-hifi-agent decide /absolute/path/to/results/My_sample
-```
-
-决策结果写入：
+`assemble` 只在生成并内部验证以下报告后进入 `TERMINAL`：
 
 ```text
-<outdir>/04_decisions/baseline/rule_decision.json
+06_report/
+├── final_report.md
+├── final_summary.json
+├── all_runs.tsv
+├── all_parameters.tsv
+├── provenance.tsv
+└── verification_report.json
 ```
 
-### 5. 运行受控 Agent
+`final_summary.json` 包含终态类别和进程退出码、完整 incumbent 链、全部 attempt、approved/rejected/
+未执行 proposal、requested/approved/rendered/realized 参数、LLM receipt 摘要及预算预留/实际消耗。
+退出码为 `0`（科学终态）、`3`（需要人工动作）、`4`（工具/完整性失败）或 `5`（必需 LLM 失败）。
+
+## 开发验收
 
 ```bash
-hifi-agent agent --resume /absolute/path/to/results/My_sample
+ruff check .
+ruff format --check .
+mypy
+pytest --cov --cov-report=term-missing --cov-fail-under=85
+pytest -q --cov=hifi_agent.orchestration.controller \
+  --cov=hifi_agent.orchestration.comparison \
+  --cov=hifi_agent.orchestration.verifier \
+  --cov=hifi_agent.reporting --cov=hifi_agent.decision.rules \
+  --cov-branch --cov-fail-under=90
+nextflow config workflow
+nextflow lint -output concise workflow
 ```
 
-Agent 会读取已验证的输入、baseline 指标和规则决策，在预算范围内给出终态结果，并记录状态和决策轨迹。
-
-### 6. 可选候选比较
-
-默认只规划和比较受控候选，不执行真实候选工作流：
-
-```bash
-hifi-agent optimize /absolute/path/to/results/My_sample
-```
-
-如需执行真实候选工作流，必须显式授权：
-
-```bash
-hifi-agent optimize /absolute/path/to/results/My_sample --execute
-```
-
-中高风险候选需要额外确认：
-
-```bash
-hifi-agent optimize /absolute/path/to/results/My_sample \
-  --execute \
-  --confirm-medium-high-risk
-```
-
-### 7. 可选 RAG/LLM 解释
-
-先构建本地知识索引：
-
-```bash
-hifi-agent rag-index
-```
-
-生成不调用 LLM 的本地解释：
-
-```bash
-hifi-agent explain /absolute/path/to/results/My_sample --no-llm
-```
-
-如需使用 DeepSeek OpenAI-compatible API，可设置环境变量后启用 `--llm`：
-
-```bash
-export DEEPSEEK_API_KEY=...
-export DEEPSEEK_BASE_URL=https://api.deepseek.com
-export DEEPSEEK_MODEL=deepseek-v4-pro
-
-hifi-agent explain /absolute/path/to/results/My_sample --llm
-```
-
-LLM 输出必须通过严格 JSON Schema、参数白名单、证据引用、重复检查和 Safety Arbiter。它可以“提议” typed candidate，但不能把提议变成 `ApprovedCandidate`，不能直接执行，也不能生成任意 shell 命令。隐私边界和真实 DeepSeek token 记录见 [LLM 数据隐私与费用](docs/v2_llm_privacy_cost.md)。
-
-### 8. 生成最终报告
-
-```bash
-hifi-agent report /absolute/path/to/results/My_sample
-```
-
-默认输出目录：
-
-```text
-<outdir>/05_report/
-```
-
-常见产物包括：
-
-```text
-final_report.md
-final_summary.json
-comparison.tsv
-parameter_diff.tsv
-provenance.tsv
-software_versions.tsv
-reproducible_commands.txt
-figures/
-```
-
-## CLI 命令速查
-
-```text
-hifi-agent --version                         显示版本
-hifi-agent validate CONFIG                   验证样本配置和输入
-hifi-agent run [--resume] CONFIG             运行完整 baseline 工作流
-hifi-agent evaluate RUN_DIR                  重新执行 post-QC
-hifi-agent decide RUN_DIR                    运行专家规则决策
-hifi-agent agent [--resume] RUN_DIR          运行或恢复受控 Agent
-hifi-agent optimize RUN_DIR                  运行有限候选规划和比较
-hifi-agent rag-index                         构建本地 RAG 知识索引
-hifi-agent explain RUN_DIR [--no-llm]        生成规则和 RAG 解释
-hifi-agent report RUN_DIR                    生成最终报告
-hifi-agent assemble CONFIG                   运行 V2 baseline 控制器
-hifi-agent propose RUN_DIR                   生成规则/可选 LLM typed proposals
-hifi-agent execute-candidate RUN APPROVED    仅执行已审批候选
-hifi-agent compare-stage7 RUN ATTEMPT ...    比较 baseline 与真实候选
-hifi-agent report-v2 RUN_DIR [required opts] 生成 V2 可追踪报告
-hifi-agent benchmark-v2 REPORT --output-dir  运行真实数据审计和 A-D 消融
-hifi-agent demo-v2 OUTPUT_DIR                运行无生物数据 V2 demo
-```
-
-## 输出目录
-
-一次典型运行会在 `outdir` 下生成以下目录：
-
-```text
-00_metadata/     解析后的配置、输入校验、校验 receipt、运行 manifest
-01_pre_qc/       FASTQ、seqkit、NanoPlot、k-mer 和 GenomeScope 指标
-02_assembly/     hifiasm baseline 组装、FASTA/GFA/bin、命令 manifest
-03_post_qc/      QUAST、BUSCO、Merqury、mapping 和聚合评价指标
-04_decisions/    专家规则、typed proposal、审批、比较和停止证据
-05_agent/        Agent 状态、轨迹、预算和轮次快照
-05_report/       V2 Markdown/JSON/TSV 报告与实际 argv
-rounds/          round_01..round_03 的 immutable candidate/attempt 记录
-logs/            Nextflow trace、timeline、report 和 DAG
-```
-
-大型测序数据、工作流缓存和结果目录不应提交到 Git。
-
-## 项目框架
-
-```text
-.
-├── src/hifi_agent/          Python 主包和 CLI
-│   ├── agent/               受控 Agent、状态和工具接口
-│   ├── benchmarking/        便携 demo 与 benchmark 场景
-│   ├── executors/           Nextflow 执行封装
-│   ├── optimization/        有限候选规划和比较
-│   ├── parsers/             生物信息学工具输出解析器
-│   ├── rag/                 本地索引、检索和解释安全层
-│   ├── reporting/           报告数据收集和渲染
-│   ├── rules/               专家规则加载和决策
-│   └── schemas/             样本配置和指标模型
-├── workflow/                Nextflow DSL2 工作流与 profile
-├── rules/                   V1 专家规则 YAML
-├── configs/                 默认阈值和知识库配置
-├── document/                RAG 可引用的工具文档和论文
-├── examples/                示例样本配置
-├── docs/                    用户说明、架构说明和演示材料
-├── benchmark/               benchmark 数据集登记和报告目录
-├── environment.yml          Conda 环境定义
-├── pyproject.toml           Python 包配置
-├── CITATION.cff             引用信息
-├── LICENSE                  开源许可证
-└── README.md                项目说明
-```
-
-## 主要依赖
-
-完整工作流依赖 `environment.yml` 中固定的工具版本，主要包括：
-
-- Python 3.12
-- OpenJDK 21
-- Nextflow
-- seqkit
-- NanoPlot
-- meryl
-- hifiasm
-- gfatools
-- QUAST
-- BUSCO
-- Merqury
-- minimap2
-- samtools
-- bedtools
-
-## 结果解读
-
-规则决策只输出三类结果：
-
-- `BASELINE`：当前 baseline 证据足够支持保留默认组装。
-- `RETRY`：允许在预算内比较少量白名单参数候选。
-- `STOP`：输入、指标、工具结果或证据冲突需要人工复核。
-
-`STOP` 不是程序失败；在覆盖不足、指标冲突或证据不完整时，停止复核是预期的保守行为。
-
-## 文档
-
-- [用户指南](docs/user_guide.md)
-- [V1→V2 迁移指南](docs/v2_migration.md)
-- [LLM 数据隐私与费用](docs/v2_llm_privacy_cost.md)
-- [三轮优化示例](docs/v2_three_round_example.md)
-- [架构说明](docs/architecture.md)
-- [规则目录](docs/rule_catalog.md)
-- [演示说明](docs/demo.md)
-
-## 引用
-
-如果你在研究或项目中使用 HiFi Agent，请引用本软件发布。引用元数据见 [CITATION.cff](CITATION.cff)。
-
-```text
-HiFi Agent contributors. HiFi Agent: a constrained PacBio HiFi assembly assistant. Version 2.0.0. 2026.
-```
-
-## 许可证
-
-本项目使用 MIT License，详见 [LICENSE](LICENSE)。
+用户操作细节见 [Quickstart](docs/v3/quickstart.md)、
+[决策模式](docs/v3/decision_modes.md)、[恢复](docs/v3/resume_and_recovery.md)、
+[预算](docs/v3/budgets.md) 与 [结果解释](docs/v3/result_interpretation.md)。阶段 5–8 的实现、恢复矩阵和
+逐项证据见
+[严格验收报告](docs/v3/stage5_stage7_acceptance.md)、
+[阶段 8 验收报告](docs/v3/stage8_acceptance.md)、
+[恢复矩阵](docs/v3/recovery_matrix.md) 与
+[需求追踪矩阵](docs/v3/requirements_traceability.md)。
