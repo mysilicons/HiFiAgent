@@ -1,8 +1,9 @@
 schema_id: "hifi-agent"
 sample_id: Candida_albicans
 read_technology: pacbio_hifi
+input_root_env: HIFI_AGENT_DATA_ROOT
 hifi_reads:
-  - ../Data/Candida_albicans/Candida_albicans_HiFi.fastq
+  - Candida_albicans/Candida_albicans_HiFi.fastq
 outdir: ../results/Candida_albicans
 species_name: Candida albicans
 expected_genome_size: 14500000
@@ -10,7 +11,7 @@ ploidy: 2
 inbred: null
 busco_lineage: saccharomycetes_odb12
 kmer_reads: null
-reference_genome: ../Data/Candida_albicans/Candida_albicans_gnome.fasta
+reference_genome: Candida_albicans/Candida_albicans_gnome.fasta
 resources:
   max_threads: 480
   max_memory_gb: 960

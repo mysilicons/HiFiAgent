@@ -231,7 +231,15 @@ def test_validation_receipt_marks_technology_as_declared_not_inferred(tmp_path: 
     assert receipt["read_technology_source"] == "USER_DECLARED_NOT_INFERRED"
 
 
-def test_repository_candida_example_is_a_valid_native_config() -> None:
+def test_repository_candida_example_is_a_valid_native_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "external-data"
+    sample_root = data_root / "Candida_albicans"
+    sample_root.mkdir(parents=True)
+    _fastq(sample_root / "Candida_albicans_HiFi.fastq")
+    (sample_root / "Candida_albicans_gnome.fasta").write_text(">reference\nACGT\n")
+    monkeypatch.setenv("HIFI_AGENT_DATA_ROOT", str(data_root))
     result = resolve_runtime_config(
         PROJECT_ROOT / "examples/candida_sample_config.yaml",
         write_outputs=False,
