@@ -2,7 +2,7 @@
 
 All notable changes are documented here. This project follows Semantic Versioning.
 
-## [Unreleased] - V3 stage 8
+## [3.0.0] - 2026-08-12
 
 ### Added
 
@@ -12,6 +12,11 @@ All notable changes are documented here. This project follows Semantic Versionin
 - CLI exit/report acceptance for scientific success, human review, tool failure, required-LLM
   failure, and round-2 SIGTERM/resume without rerun or rebilling.
 - V3 quickstart, decision-mode, resume, budget, result-interpretation, architecture, and ADR docs.
+- Clean-commit Drosophila real-data acceptance with baseline, one single-variable candidate,
+  live provider smoke, zero-skip real suite, and a hash-bound evidence bundle.
+- Package-owned Nextflow, comparison-policy, and governed-knowledge resources so the wheel runs
+  independently from a source checkout.
+- Release wheel/sdist build and isolated-wheel portable execution gates.
 
 ### Changed
 
@@ -20,6 +25,7 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Governed retrieval now preserves source diversity and accepts a complete locked version token in
   a tool banner; safety authorization evaluates all matching evidence chunks for a source.
 - Nextflow SIGINT/SIGTERM return codes are classified as resumable interruption.
+- The production workflow and immutable decision resources are loaded from package data.
 - CLI help labels advanced options and states that deprecated V2 commands/aliases are removed.
 
 ### Removed

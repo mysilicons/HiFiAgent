@@ -41,6 +41,19 @@ jobs:
       - name: Portable README demo
         run: python scripts/run_portable_demo.py --workspace /tmp/hifi-agent-portable --scenario three-rounds
 
+      - name: Build release distributions
+        run: python -m build --no-isolation
+
+      - name: Verify isolated wheel execution
+        run: |
+          target="$(mktemp -d)"
+          workspace="$(mktemp -d)"
+          python -m pip install --no-deps --target "$target" dist/hifi_agent-3.0.0-py3-none-any.whl
+          PYTHONPATH="$target" python scripts/run_portable_demo.py \
+            --installed-package \
+            --workspace "$workspace" \
+            --scenario three-rounds
+
   nextflow-resume:
     runs-on: ubuntu-latest
     env:

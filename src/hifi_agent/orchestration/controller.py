@@ -9,6 +9,7 @@ from typing import cast
 
 from hifi_agent.config import verify_recorded_input_checksums
 from hifi_agent.constants import __version__
+from hifi_agent.data import COMPARISON_POLICY, KNOWLEDGE_INDEX
 from hifi_agent.decision.client import RecordedLLMClient, StructuredLLMClient
 from hifi_agent.decision.retrieval import LocalGovernedRetriever
 from hifi_agent.decision.rules import build_rule_directive
@@ -108,8 +109,6 @@ from hifi_agent.schemas.assembly import (
     RiskLevel,
     baseline_assembly_config,
 )
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 __all__ = ["CoordinatorResult", "ProposalServiceFactory", "RunCoordinator"]
 
@@ -226,8 +225,8 @@ class RunCoordinator:
         )
         policy_path = sample.outdir / "04_decisions/comparison_policy_snapshot.yaml"
         rag_path = sample.outdir / "04_decisions/rag_index_snapshot.json"
-        _exclusive_copy(PROJECT_ROOT / "configs/comparison_policy.yaml", policy_path)
-        _exclusive_copy(PROJECT_ROOT / "knowledge/index.json", rag_path)
+        _exclusive_copy(COMPARISON_POLICY, policy_path)
+        _exclusive_copy(KNOWLEDGE_INDEX, rag_path)
         identity = RunIdentity.create(
             sample_id=sample.sample_id,
             run_dir=sample.outdir,

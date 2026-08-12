@@ -532,7 +532,7 @@ def _junit_counts(path: Path) -> tuple[int, int, int, int]:
 
 
 def _verify_wheel_source(wheel_path: Path, package_version: str) -> None:
-    """Require the accepted wheel to contain byte-identical committed Python sources."""
+    """Require byte-identical package sources and production runtime resources."""
     try:
         with zipfile.ZipFile(wheel_path) as archive:
             names = set(archive.namelist())
@@ -564,6 +564,27 @@ def _verify_wheel_source(wheel_path: Path, package_version: str) -> None:
                 raise InputValidationError(
                     "Wheel contains source bytes that differ from the clean commit: "
                     + ", ".join(changed)
+                )
+            data_root = PROJECT_ROOT / "src/hifi_agent/data"
+            expected_resources = {
+                path.relative_to(PROJECT_ROOT / "src").as_posix(): path
+                for path in data_root.rglob("*")
+                if path.is_file() and path.suffix in {".config", ".json", ".nf", ".yaml"}
+            }
+            missing_resources = sorted(set(expected_resources).difference(names))
+            if missing_resources:
+                raise InputValidationError(
+                    "Wheel is missing production runtime resources: " + ", ".join(missing_resources)
+                )
+            changed_resources = [
+                name
+                for name, source in expected_resources.items()
+                if archive.read(name) != source.read_bytes()
+            ]
+            if changed_resources:
+                raise InputValidationError(
+                    "Wheel contains runtime resource bytes that differ from the clean commit: "
+                    + ", ".join(changed_resources)
                 )
     except zipfile.BadZipFile as exc:
         raise InputValidationError(f"Wheel artifact is invalid: {exc}") from exc

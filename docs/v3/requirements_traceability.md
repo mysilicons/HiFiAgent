@@ -61,7 +61,7 @@
 | ID | 要求 | 实现/交付物 | 测试或证据 | 状态 |
 |---|---|---|---|---|
 | V3-S3-01 | baseline/candidate 共用 executor | `executors/assembly.py` | common runner tests | ACCEPTED |
-| V3-S3-02 | attempt-local publish/work/cache | `executors/nextflow.py`, `workflow/main.nf` | Nextflow argv/layout tests | ACCEPTED |
+| V3-S3-02 | attempt-local publish/work/cache | `executors/nextflow.py`, packaged `data/workflow/main.nf` | Nextflow argv/layout tests | ACCEPTED |
 | V3-S3-03 | 六件套参数 round-trip | `executors/hifiasm_contract.py` | boundary/illegal-token tests | ACCEPTED |
 | V3-S3-04 | 同源 post-QC contract | `PostQcContract`, `ASSEMBLY_ATTEMPT` | baseline/candidate equality test | ACCEPTED |
 | V3-S3-05 | inventory、marker、deep verify | `executors/assembly.py`, `verifier.py` | missing/tamper/deep tests | ACCEPTED |

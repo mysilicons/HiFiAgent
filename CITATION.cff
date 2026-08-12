@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If you use HiFi Agent, please cite this software release."
 title: "HiFi Agent: a constrained PacBio HiFi assembly assistant"
 type: software
-version: 2.0.0
-date-released: 2026-07-29
+version: 3.0.0
+date-released: 2026-08-12
 authors:
   - name: "HiFi Agent contributors"
 license: MIT

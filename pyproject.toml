@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,8 @@ version = "3.0.0"
 description = "Native constrained PacBio HiFi genome assembly assistant."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
   { name = "HiFi Agent contributors" },
 ]
@@ -23,6 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "build>=1.2,<2",
   "mypy>=1.10",
   "pytest>=8",
   "pytest-cov>=5,<7",
@@ -37,7 +39,13 @@ hifi-agent = "hifi_agent.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"hifi_agent.data" = ["comparison_policy.yaml"]
+"hifi_agent.data" = [
+  "comparison_policy.yaml",
+  "knowledge/*.json",
+  "workflow/*.config",
+  "workflow/*.nf",
+  "workflow/conf/*.config",
+]
 
 [tool.pytest.ini_options]
 addopts = ["-ra", "--strict-markers", "--strict-config"]

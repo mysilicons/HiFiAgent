@@ -4,7 +4,7 @@ read_technology: pacbio_hifi
 input_root_env: HIFI_AGENT_DATA_ROOT
 hifi_reads:
   - Drosophila_melanogaster/Drosophila_melanogaster_HiFi.fastq
-outdir: ../results/Drosophila_melanogaster_acceptance_run3
+outdir: ../results/Drosophila_melanogaster_release_acceptance
 species_name: Drosophila melanogaster
 expected_genome_size: 180000000
 ploidy: 2

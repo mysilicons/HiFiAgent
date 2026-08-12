@@ -9,6 +9,7 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+/release/v3.0.0/
 
 # Conda and local envs
 .conda/
@@ -30,6 +31,8 @@ logs/
 data/
 !src/hifi_agent/data/
 !src/hifi_agent/data/**
+src/hifi_agent/data/**/__pycache__/
+src/hifi_agent/data/**/*.py[cod]
 *.fastq
 *.fastq.gz
 *.fq

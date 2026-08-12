@@ -1,19 +1,17 @@
 # V3 阶段 9 真实验收报告与运行手册
 
 > 准备日期：2026-08-10
-> 当前状态：`RUN2_SCIENTIFIC_PASS_RELEASE_BLOCKED`，不是 `ACCEPTED`
+> 当前状态：`ACCEPTED`
 > 数据：Drosophila melanogaster / SRR33554835 / PacBio HiFi
 
 ## 当前结论
 
 阶段 9 的生产配置、外部数据根契约、离线 BUSCO 门禁、强制单变量对照、真实 run verifier、live
-provider smoke、0-skip real suite 和 evidence builder 已实现。第一次真实 baseline 已完成，但 Conda
-Merqury 的符号链接被 workflow 错误解释为安装根目录，造成 `kmer_qv` 和 `kmer_completeness` 缺失；
-控制器按安全策略以 `STOP_INSUFFICIENT_EVIDENCE` 终止，没有执行不可比较的 candidate。该缺陷已修复，
-并加入运行时资产预检和回归测试。run2 已完成 baseline、单变量 candidate、comparison、deep verifier
-和 real verifier，科学结论为 `KEEP_INCUMBENT / STOP_PLATEAU`。但 run2 仍在未提交工作树上执行，无法
-绑定 current clean commit；live API 也因缺少明确的外部数据披露授权而未通过。因此配置已切换到独立
-的 `_run3` 目录；run1/run2 均完整保留，但不能代替最终发布证据。
+provider smoke、0-skip real suite 和 evidence builder 已实现。run1 暴露并安全闭锁了 Merqury 资产解析
+问题；run2 完成科学闭环，但因 dirty worktree 不能作为发布证据；run3 在 clean commit 上重新完成
+baseline、单变量 candidate、comparison、deep/real verifier、DeepSeek live smoke、3 项零跳过真实测试
+和 hash-bound evidence bundle。阶段 9 因此接受，科学结论为 `KEEP_INCUMBENT / STOP_PLATEAU`，不声明
+候选改善或全局参数最优性。
 
 真实配置使用 128 threads、960 GB 上限，在 1 TiB 主机上保留约 64 GB 给系统和文件缓存；Merqury
 明确预留 128 threads/512 GB，以覆盖 `meryl-lookup` 的大缓冲区。磁盘安全底线为 1,000 GiB。
@@ -57,6 +55,19 @@ Merqury 的符号链接被 workflow 错误解释为安装根目录，造成 `kme
 
 完整指标、证据哈希、限制和失败门禁见 `stage9_run2_assessment.md`。run2 的科学证据有效，但其 immutable
 identity 绑定旧 commit，提交当前代码后也不能追溯修复；最终发布链必须重新产生 run3。
+
+## run3 最终验收结果
+
+| 项目 | 结果 |
+|---|---|
+| clean commit | PASS，`340e2bee88c97d48e36c03d57872f1e190cb00c3` |
+| baseline/candidate | PASS，仅 `purge_level 3→2` |
+| comparison/终态 | `KEEP_INCUMBENT / STOP_PLATEAU` |
+| deep/real verifier | PASS / PASS |
+| live provider | PASS，Schema、Safety Arbiter、secret scan 均 PASS |
+| real suite | PASS，3 tests / 0 failed / 0 errors / 0 skipped |
+| evidence bundle | PASS，wheel、commit、config、input、environment 和 run hash 一致 |
+| 阶段 9 | **ACCEPTED** |
 
 ## 第一次运行前
 

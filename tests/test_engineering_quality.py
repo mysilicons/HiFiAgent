@@ -79,7 +79,9 @@ def test_code_surface_has_no_generation_markers() -> None:
         path
         for root in CODE_ROOTS
         for path in root.rglob("*")
-        if path.is_file() and path.suffix in CODE_SUFFIXES
+        if path.is_file()
+        and path.suffix in CODE_SUFFIXES
+        and not path.is_relative_to(SOURCE_ROOT / "data/knowledge")
     ]
     paths.extend((PROJECT_ROOT / "pyproject.toml", PROJECT_ROOT / "environment.yml"))
     for path in sorted(set(paths)):
@@ -97,8 +99,17 @@ def test_code_surface_has_no_generation_markers() -> None:
 
 def test_knowledge_contract_uses_neutral_identifiers() -> None:
     """Check generated knowledge metadata without scanning quoted third-party publications."""
-    for relative in ("knowledge/index.json", "knowledge/index_manifest.json"):
+    for relative in (
+        "src/hifi_agent/data/knowledge/index.json",
+        "src/hifi_agent/data/knowledge/index_manifest.json",
+    ):
         payload = json.loads((PROJECT_ROOT / relative).read_text())
         assert payload["schema_id"] == "hifi-agent"
         assert payload["catalog_id"] == "production-knowledge"
         assert not set(VERSIONED_CONTRACT_KEYS).intersection(payload)
+
+
+def test_public_policy_copy_matches_packaged_runtime_policy() -> None:
+    public_policy = PROJECT_ROOT / "configs/comparison_policy.yaml"
+    packaged_policy = PROJECT_ROOT / "src/hifi_agent/data/comparison_policy.yaml"
+    assert public_policy.read_bytes() == packaged_policy.read_bytes()

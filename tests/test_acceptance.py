@@ -44,9 +44,15 @@ def test_dataset_resolution_requires_explicit_root(
 
 def test_wheel_gate_requires_byte_identical_current_sources(tmp_path: Path) -> None:
     wheel = tmp_path / "hifi_agent-3.0.0-py3-none-any.whl"
-    sources = sorted((PROJECT_ROOT / "src/hifi_agent").rglob("*.py"))
+    package_root = PROJECT_ROOT / "src/hifi_agent"
+    sources = sorted(package_root.rglob("*.py"))
+    resources = sorted(
+        path
+        for path in (package_root / "data").rglob("*")
+        if path.is_file() and path.suffix in {".config", ".json", ".nf", ".yaml"}
+    )
     with zipfile.ZipFile(wheel, "w") as archive:
-        for source in sources:
+        for source in [*sources, *resources]:
             archive.write(source, source.relative_to(PROJECT_ROOT / "src").as_posix())
         archive.writestr(
             "hifi_agent-3.0.0.dist-info/METADATA",
@@ -57,7 +63,7 @@ def test_wheel_gate_requires_byte_identical_current_sources(tmp_path: Path) -> N
 
     corrupt = tmp_path / "hifi_agent-3.0.0-corrupt-py3-none-any.whl"
     with zipfile.ZipFile(corrupt, "w") as archive:
-        for source in sources:
+        for source in [*sources, *resources]:
             name = source.relative_to(PROJECT_ROOT / "src").as_posix()
             content = "changed\n" if name == "hifi_agent/constants.py" else source.read_bytes()
             archive.writestr(name, content)
@@ -67,6 +73,20 @@ def test_wheel_gate_requires_byte_identical_current_sources(tmp_path: Path) -> N
         )
     with pytest.raises(InputValidationError, match="source bytes"):
         _verify_wheel_source(corrupt, "3.0.0")
+
+    missing_resource = tmp_path / "hifi_agent-3.0.0-missing-resource-py3-none-any.whl"
+    omitted = "hifi_agent/data/workflow/main.nf"
+    with zipfile.ZipFile(missing_resource, "w") as archive:
+        for source in [*sources, *resources]:
+            name = source.relative_to(PROJECT_ROOT / "src").as_posix()
+            if name != omitted:
+                archive.write(source, name)
+        archive.writestr(
+            "hifi_agent-3.0.0.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: hifi-agent\nVersion: 3.0.0\n",
+        )
+    with pytest.raises(InputValidationError, match="missing production runtime resources"):
+        _verify_wheel_source(missing_resource, "3.0.0")
 
 
 def test_source_config_must_reproduce_run_effective_config(tmp_path: Path) -> None:

@@ -1,7 +1,6 @@
-from pathlib import Path
+from hifi_agent.data import WORKFLOW_ROOT
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-WORKFLOW_DIR = PROJECT_ROOT / "workflow"
+WORKFLOW_DIR = WORKFLOW_ROOT
 
 
 def test_workflow_files_exist() -> None:
@@ -14,6 +13,13 @@ def test_workflow_files_exist() -> None:
 
     for path in expected_files:
         assert path.is_file(), path
+
+
+def test_runtime_policy_and_knowledge_are_packaged() -> None:
+    from hifi_agent.data import COMPARISON_POLICY, KNOWLEDGE_INDEX
+
+    assert COMPARISON_POLICY.is_file()
+    assert KNOWLEDGE_INDEX.is_file()
 
 
 def test_main_declares_minimal_processes() -> None:

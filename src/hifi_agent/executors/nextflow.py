@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from hifi_agent.config import verify_recorded_input_checksums, verify_validation_receipt
+from hifi_agent.data import WORKFLOW_CONFIG, WORKFLOW_ENTRY
 from hifi_agent.exceptions import InterruptedExecutionError, ToolExecutionError
 from hifi_agent.executors.models import (
     ArtifactInventory,
@@ -26,9 +27,6 @@ from hifi_agent.orchestration.runtime_models import sha256_file
 from hifi_agent.schemas.sample import SampleConfig
 from hifi_agent.tool_resolution import declared_subprocess_environment, resolve_configured_tool
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW_ENTRY = PROJECT_ROOT / "workflow/main.nf"
-WORKFLOW_CONFIG = PROJECT_ROOT / "workflow/nextflow.config"
 CommandRunner = Callable[[list[str], Path, dict[str, str]], None]
 
 

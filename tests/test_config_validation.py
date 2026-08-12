@@ -73,6 +73,22 @@ def test_unknown_top_level_field_is_rejected(tmp_path: Path) -> None:
         validate_config_file(_write(tmp_path, data), write_outputs=False)
 
 
+@pytest.mark.parametrize("unsupported_schema", ["hifi_agent", "assembly-agent", "unsupported"])
+def test_noncanonical_schemas_are_rejected(tmp_path: Path, unsupported_schema: str) -> None:
+    data = _config(tmp_path)
+    data["schema_id"] = unsupported_schema
+    with pytest.raises(InputValidationError, match="schema_id"):
+        validate_config_file(_write(tmp_path, data), write_outputs=False)
+
+
+@pytest.mark.parametrize("old_field", ["reads", "threads", "memory_gb", "run_version"])
+def test_removed_configuration_fields_are_rejected(tmp_path: Path, old_field: str) -> None:
+    data = _config(tmp_path)
+    data[old_field] = "removed"
+    with pytest.raises(InputValidationError, match=old_field):
+        validate_config_file(_write(tmp_path, data), write_outputs=False)
+
+
 @pytest.mark.parametrize("field", ["hi_c_reads", "ont_reads", "trio_reads"])
 def test_out_of_scope_input_types_are_rejected(tmp_path: Path, field: str) -> None:
     data = _config(tmp_path)

@@ -104,13 +104,16 @@ def _write_config(workspace: Path, scenario: str) -> tuple[Path, Path]:
     return path, run_dir
 
 
-def _run_cli(config: Path, *, resume: bool = False) -> subprocess.CompletedProcess[str]:
+def _run_cli(
+    config: Path, *, resume: bool = False, installed_package: bool = False
+) -> subprocess.CompletedProcess[str]:
     command = [sys.executable, "-m", "hifi_agent", "assemble", str(config)]
     if resume:
         command.append("--resume")
     environment = os.environ.copy()
     environment.pop("DEEPSEEK_API_KEY", None)
-    environment["PYTHONPATH"] = str(_project_root() / "src")
+    if not installed_package:
+        environment["PYTHONPATH"] = str(_project_root() / "src")
     return subprocess.run(
         command,
         cwd=_project_root(),
@@ -136,14 +139,23 @@ def main() -> int:
         ),
         default="three-rounds",
     )
+    parser.add_argument(
+        "--installed-package",
+        action="store_true",
+        help="Exercise the installed package instead of the source tree.",
+    )
     arguments = parser.parse_args()
     config, run_dir = _write_config(arguments.workspace.resolve(), arguments.scenario)
-    first = _run_cli(config)
+    first = _run_cli(config, installed_package=arguments.installed_package)
     observed_codes = [first.returncode]
     stderr = first.stderr
     stdout = first.stdout
     if arguments.scenario == "resume" and first.returncode == 4:
-        resumed = _run_cli(config, resume=True)
+        resumed = _run_cli(
+            config,
+            resume=True,
+            installed_package=arguments.installed_package,
+        )
         observed_codes.append(resumed.returncode)
         stderr += resumed.stderr
         stdout += resumed.stdout

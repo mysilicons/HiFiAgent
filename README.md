@@ -4,7 +4,7 @@ HiFi Agent V3 是面向单样本 PacBio HiFi 的受约束组装助手。当前�
 `schema_id: "hifi-agent"`，只写 canonical V3 run，不包含旧版本控制器、Schema、迁移器、导出器或
 兼容执行入口。
 
-当前已实现并严格验收阶段 0～8：
+当前已实现并严格验收阶段 0～9，阶段 10 发布门禁正在执行：
 
 - 原生 V3 配置、环境预检、不可变 run identity、事务状态日志、单写者锁和统一预算；
 - pre-QC 与 baseline 通过公开 `assemble` 的唯一 `RunCoordinator`；
@@ -52,10 +52,10 @@ python scripts/run_portable_demo.py --workspace /tmp/hifi-agent-portable --scena
 verifier、release-only pytest suite、live provider smoke 和 evidence builder。配置通过
 `HIFI_AGENT_DATA_ROOT` 定位未提交 Git 的 34.9 GB FASTQ，固定使用 128 线程并把内存上限设为
 960 GB。完整的预下载、启动、恢复、日志和最终验收命令见
-[阶段 9 验收报告](docs/v3/stage9_acceptance.md)。run2 已完成真实 baseline、单变量 candidate、同源
-post-QC 和 comparison，deep/real verifier 均 PASS，科学结论为 `KEEP_INCUMBENT / STOP_PLATEAU`。
-但 run2 未绑定 clean commit，且 live API、0-skip real suite 和 evidence bundle 尚未通过，因此阶段状态为
-`RUN2_SCIENTIFIC_PASS_RELEASE_BLOCKED`；最终发布证据必须由 clean commit 上的 run3 产生。
+[阶段 9 验收报告](docs/v3/stage9_acceptance.md)。run3 已在 clean commit 上完成真实 baseline、单变量
+candidate、同源 post-QC、comparison、live API、0-skip real suite 和 evidence bundle；deep/real verifier
+均为 PASS，科学结论为 `KEEP_INCUMBENT / STOP_PLATEAU`。这证明当前受限搜索空间内的真实闭环和审计
+链有效，不构成全局参数最优性声明。
 
 ## 配置示例：
 
@@ -167,8 +167,8 @@ pytest -q --cov=hifi_agent.orchestration.controller \
   --cov=hifi_agent.orchestration.verifier \
   --cov=hifi_agent.reporting --cov=hifi_agent.decision.rules \
   --cov-branch --cov-fail-under=90
-nextflow config workflow
-nextflow lint -output concise workflow
+nextflow config src/hifi_agent/data/workflow
+nextflow lint -output concise src/hifi_agent/data/workflow
 ```
 
 用户操作细节见 [Quickstart](docs/v3/quickstart.md)、
