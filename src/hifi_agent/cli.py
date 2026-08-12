@@ -65,7 +65,7 @@ def abort_with_error(error: HiFiAgentError) -> NoReturn:
 
 @app.command()
 def validate(
-    config: Annotated[Path, typer.Argument(help="Species/sample YAML file.")],
+    config: Annotated[Path, typer.Argument(help="Single-sample YAML file.")],
 ) -> None:
     """Validate inputs and materialize metadata receipts."""
     try:
@@ -81,7 +81,7 @@ def validate(
 
 @app.command()
 def plan(
-    config: Annotated[Path, typer.Argument(help="Species/sample YAML file.")],
+    config: Annotated[Path, typer.Argument(help="Single-sample YAML file.")],
     decision_mode: Annotated[
         Literal["rules_only", "hybrid", "llm_disabled"] | None,
         typer.Option("--decision-mode", help="Advanced: audited decision-mode override."),
@@ -107,7 +107,7 @@ def plan(
 
 @app.command()
 def assemble(
-    config: Annotated[Path, typer.Argument(help="Species/sample YAML file.")],
+    config: Annotated[Path, typer.Argument(help="Single-sample YAML file.")],
     resume: Annotated[
         bool,
         typer.Option(

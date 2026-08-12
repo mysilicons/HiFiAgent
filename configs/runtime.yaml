@@ -6,8 +6,8 @@ paths:
   cache_root: ../cache/hifi-agent
 
 resources:
-  max_threads: 128
-  max_memory_gb: 960
+  max_threads: 32
+  max_memory_gb: 128
 
 optimization:
   enabled: true
@@ -24,9 +24,9 @@ optimization:
 execution_budget:
   max_total_assemblies: 2
   max_tool_retries: 1
-  max_cpu_hours: 30000
-  max_walltime_hours: 336
-  min_free_disk_gib: 1000
+  max_cpu_hours: 10000
+  max_walltime_hours: 168
+  min_free_disk_gib: 100
   max_llm_calls_per_round: 0
   max_total_llm_calls: 0
 

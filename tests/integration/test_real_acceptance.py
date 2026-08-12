@@ -8,8 +8,6 @@ import pytest
 from hifi_agent.acceptance import ResolvedDataset, resolve_dataset, verify_real_run
 from hifi_agent.live_smoke import verify_live_smoke
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATASET_ID = "drosophila_melanogaster_srr33554835"
 ENABLED = os.environ.get("HIFI_AGENT_REAL_ACCEPTANCE") == "1"
 
 pytestmark = [
@@ -26,9 +24,18 @@ def _required_path(name: str) -> Path:
     return path
 
 
+def _required_value(name: str) -> str:
+    value = os.environ.get(name)
+    assert value, f"{name} must be set when real acceptance is enabled"
+    return value
+
+
 @pytest.fixture(scope="module")
 def real_dataset() -> ResolvedDataset:
-    return resolve_dataset(PROJECT_ROOT / "benchmark/datasets.yaml", DATASET_ID)
+    return resolve_dataset(
+        _required_path("HIFI_AGENT_REAL_REGISTRY"),
+        _required_value("HIFI_AGENT_REAL_DATASET_ID"),
+    )
 
 
 def test_frozen_real_dataset_matches_local_bytes(real_dataset: ResolvedDataset) -> None:

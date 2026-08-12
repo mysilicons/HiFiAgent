@@ -8,20 +8,16 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-LOCAL_JAVA_HOME = Path("/home/gw/software/jdk21")
-LOCAL_JAVA_CMD = LOCAL_JAVA_HOME / "bin" / "java"
+FIXTURE_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "nextflow_resume"
 
 
 def _nextflow_runtime() -> tuple[str, dict[str, str]]:
     """Return a usable Nextflow executable and environment or skip the test."""
-    nextflow = shutil.which("nextflow") or "/home/gw/software/nextflow"
-    if not Path(nextflow).exists():
+    nextflow = shutil.which("nextflow")
+    if nextflow is None:
         pytest.skip("Nextflow is not installed in this environment.")
     env = os.environ.copy()
-    if LOCAL_JAVA_CMD.exists():
-        env["JAVA_HOME"] = str(LOCAL_JAVA_HOME)
-        env["JAVA_CMD"] = str(LOCAL_JAVA_CMD)
-    elif shutil.which("java") is None:
+    if shutil.which("java") is None:
         pytest.skip("Java 17 or newer is not available in this environment.")
     return nextflow, env
 
@@ -34,9 +30,9 @@ def test_interrupted_workflow_resumes_completed_process_from_cache(tmp_path: Pat
     command = [
         nextflow,
         "run",
-        str(PROJECT_ROOT / "workflow" / "acceptance" / "resume.nf"),
+        str(FIXTURE_ROOT / "resume.nf"),
         "-c",
-        str(PROJECT_ROOT / "workflow" / "acceptance" / "resume.config"),
+        str(FIXTURE_ROOT / "resume.config"),
         "-work-dir",
         str(tmp_path / "work"),
         "--outdir",

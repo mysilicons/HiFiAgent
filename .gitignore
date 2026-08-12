@@ -9,7 +9,7 @@ htmlcov/
 dist/
 build/
 *.egg-info/
-/release/v3.0.0/
+/release/
 
 # Conda and local envs
 .conda/
@@ -59,14 +59,14 @@ src/hifi_agent/data/**/*.py[cod]
 
 # Internal planning, acceptance, and source-research artifacts
 /HiFi_Agent_*_Project_Plan.md
-/HiFi_Agent_*_Compliance_Assessment.md
+/HiFi_Agent_*_Assessment.md
 /docs/adr/
-/docs/v[0-9]*/
+/docs/internal/
 /benchmark/reports/
 /document/
 /configs/*_real_acceptance.yaml
 /configs/knowledge_sources.yaml
 /scripts/build_release_bundle.py
 
-# DataSets
+# External datasets
 Data/

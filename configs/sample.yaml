@@ -1,0 +1,15 @@
+schema_id: hifi-agent-sample
+runtime_config: runtime.yaml
+sample_id: sample_001
+read_technology: pacbio_hifi
+
+hifi_reads:
+  - sample/reads.fastq.gz
+
+species_name: null
+expected_genome_size: null
+ploidy: null
+inbred: null
+busco_lineage: null
+kmer_reads: null
+reference_genome: null

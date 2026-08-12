@@ -1,3 +1,4 @@
+import gzip
 import json
 import re
 from pathlib import Path
@@ -231,14 +232,15 @@ def test_validation_receipt_marks_technology_as_declared_not_inferred(tmp_path: 
     assert receipt["read_technology_source"] == "USER_DECLARED_NOT_INFERRED"
 
 
-def test_repository_candida_example_is_a_valid_native_config(
+def test_repository_generic_sample_is_a_valid_native_config(
     tmp_path: Path,
 ) -> None:
     data_root = tmp_path / "Data"
-    sample_root = data_root / "Candida_albicans"
+    sample_root = data_root / "sample"
     sample_root.mkdir(parents=True)
-    _fastq(sample_root / "Candida_albicans_HiFi.fastq")
-    (sample_root / "Candida_albicans_gnome.fasta").write_text(">reference\nACGT\n")
+    reads = sample_root / "reads.fastq.gz"
+    with gzip.open(reads, "wt") as handle:
+        handle.write("@read\nACGT\n+\nIIII\n")
     runtime_data = yaml.safe_load((PROJECT_ROOT / "configs/runtime.yaml").read_text())
     runtime_data["paths"] = {
         "data_root": str(data_root),
@@ -248,15 +250,15 @@ def test_repository_candida_example_is_a_valid_native_config(
     runtime_data["execution_budget"]["min_free_disk_gib"] = 0
     runtime = tmp_path / "runtime.yaml"
     runtime.write_text(yaml.safe_dump(runtime_data))
-    sample_data = yaml.safe_load((PROJECT_ROOT / "examples/candida_sample_config.yaml").read_text())
+    sample_data = yaml.safe_load((PROJECT_ROOT / "configs/sample.yaml").read_text())
     sample_data["runtime_config"] = str(runtime)
-    sample = tmp_path / "candida.yaml"
+    sample = tmp_path / "sample.yaml"
     sample.write_text(yaml.safe_dump(sample_data))
 
     result = resolve_runtime_config(sample, write_outputs=False)
 
     assert result.effective.sample.schema_id == "hifi-agent"
-    assert result.effective.sample.hifi_reads[0].name == "Candida_albicans_HiFi.fastq"
+    assert result.effective.sample.hifi_reads[0].name == "reads.fastq.gz"
     assert result.effective.maximum_planned_assemblies() == 2
     assert result.source_map["species_name"] == "sample"
     assert result.source_map["resources.max_threads"] == "runtime"

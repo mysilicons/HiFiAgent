@@ -6,67 +6,59 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Added
 
-- Executable portable fixture toolchain running baseline plus three rounds through the real CLI,
-  subprocess, Nextflow runner, parsers, filesystem contracts, reports, and deep verifier.
+- Portable fixture toolchain that exercises the real CLI, subprocess boundary, workflow runner,
+  parsers, parameter contracts, reports, and deep verifier without biological data.
 - Checksummed, round-bound recorded LLM transcript replay for offline hybrid acceptance.
-- CLI exit/report acceptance for scientific success, human review, tool failure, required-LLM
-  failure, and round-2 SIGTERM/resume without rerun or rebilling.
-- V3 quickstart, decision-mode, resume, budget, result-interpretation, architecture, and ADR docs.
-- Clean-commit Drosophila real-data acceptance with baseline, one single-variable candidate,
-  live provider smoke, zero-skip real suite, and a hash-bound evidence bundle.
-- Package-owned Nextflow, comparison-policy, and governed-knowledge resources so the wheel runs
+- Stable CLI exit and report contracts for scientific stops, human review, tool failures,
+  required-provider failures, and interrupted-run recovery.
+- Package-owned workflow, comparison policy, and governed knowledge resources so wheels run
   independently from a source checkout.
-- Release wheel/sdist build and isolated-wheel portable execution gates.
-- Strictly separated shared runtime and per-species configuration files with one-command runs.
-- Lock-protected on-demand BUSCO lineage caching, immutable source snapshots, and automatic resume.
-- Post-verification standard retention that removes only regenerable workflow work directories.
+- Strictly separated shared runtime and single-sample configuration with one-command execution.
+- Lock-protected BUSCO lineage caching, immutable source snapshots, automatic resume, and
+  post-verification retention.
+- Real-data registry, strict run verification, live-provider smoke test, and hash-bound evidence
+  bundle interfaces that keep external data outside Git.
 
 ### Changed
 
-- Split the 1481-line coordinator into one 824-line authoritative state machine plus round,
-  terminal, artifact-support, and port/result modules; no second controller or state was added.
-- Governed retrieval now preserves source diversity and accepts a complete locked version token in
-  a tool banner; safety authorization evaluates all matching evidence chunks for a source.
-- Nextflow SIGINT/SIGTERM return codes are classified as resumable interruption.
-- The production workflow and immutable decision resources are loaded from package data.
-- CLI help labels advanced options and states that deprecated V2 commands/aliases are removed.
+- Consolidated production lifecycle ownership into one authoritative coordinator and one run
+  state, with separate round, terminal, and typed artifact services.
+- Governed retrieval preserves source diversity and checks tool-version evidence before parameter
+  authorization.
+- Baseline and candidate attempts share the same executor and post-QC protocol.
+- Nextflow SIGINT and SIGTERM results are classified as resumable interruptions.
+- Release distributions are checked through isolated-wheel portable execution.
 
 ### Removed
 
-- No V2 compatibility command, reader, migration path, execution adapter, or deprecated alias was
-  restored for stage 8.
+- Deprecated compatibility commands, migration readers, execution adapters, and aliases.
+- Repository-bound real input paths and ungoverned development artifacts.
 
 ## [2.0.0] - 2026-07-29
 
 ### Added
 
-- Immutable V2 run/attempt/round schemas and a single orchestration controller.
-- Typed QC features, evidence-governed RAG, strict DeepSeek proposal parsing, and deterministic
-  Safety Arbiter approval.
-- Candidate argv round-trip contracts, unique attempt directories, and real execution receipts.
-- Versioned multi-metric comparison policy with hard-regression, plateau, conflict, budget, and
-  maximum-three-round stop outcomes.
-- V2 JSON/Markdown/TSV reports tracing approved parameters to actual argv and artifacts.
-- Genuine Candida closed-loop acceptance, full-checksum Candida/Drosophila input audit, five
-  comparator safety scenarios, and A/B/C/D ablation.
-- Data-free `demo-v2`, V1→V2 migration guide, privacy/cost disclosure, three-round example, and
-  clean-clone release verification.
+- Immutable run, attempt, and round schemas with a single orchestration controller.
+- Typed QC features, evidence-governed retrieval, strict structured proposal parsing, and a
+  deterministic Safety Arbiter.
+- Candidate argv round-trip contracts, unique attempt directories, and execution receipts.
+- Multi-metric comparison policy with hard regressions, plateau, conflict, budget, and bounded
+  round outcomes.
+- JSON, Markdown, and TSV reports tracing approved parameters to actual argv and artifacts.
+- Privacy and cost disclosure, repeatable three-round demonstration, and clean-build verification.
 
 ### Changed
 
-- LLM is now permitted to propose schema-valid whitelist candidates, but only the deterministic
-  Safety Arbiter can issue an `ApprovedCandidate`; the execution boundary remains non-LLM.
+- Structured providers may propose whitelist candidates, but only the deterministic Safety Arbiter
+  can issue an approved full configuration.
 - Default optimization is one candidate per round and at most three rounds.
-- The V2 comparison policy is packaged into the wheel instead of being read from the source tree.
+- The comparison policy is packaged into the wheel instead of read from the source tree.
 
 ### Known limitations
 
-- The genuine Candida candidate completed and passed its parameter contract, then stopped at a
-  material plateau; no biological improvement is claimed.
-- Drosophila is a genuine full-FASTQ integrity/scale audit, not a completed assembly claim.
-- Same-read Merqury evidence remains advisory; independent reads are preferred.
-- DeepSeek monetary price is not frozen. The retained live acceptance records token counts, model,
-  endpoint class, and response hash, but no API key or raw private prompt.
+- Same-read Merqury evidence is advisory; independent reads are preferred.
+- External-provider prices are not frozen; receipts retain token counts, model, endpoint class, and
+  response hash without retaining credentials.
 
 ## [1.0.0] - 2026-07-14
 
@@ -74,17 +66,14 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 - Validated single-sample PacBio HiFi configuration and provenance receipts.
 - Nextflow DSL2 pre-QC, hifiasm baseline, post-QC, and resume workflow.
-- Versioned expert rules with bounded parameter whitelist and explicit stop states.
-- Budgeted Agent controller, local RAG index, and constrained DeepSeek explanation layer.
-- One-round closed-loop candidate comparison with multi-metric hard gates.
-- Markdown/JSON/TSV reporting with sensitive-path redaction.
-- Ten-scenario Stage 13 benchmark, A/B/C/D comparison, ablations, and Agent metrics.
-- Portable demo, user/developer guides, rule catalog, release checklist, and citation metadata.
+- Bounded expert rules, explicit stop states, and a constrained explanation layer.
+- One-round candidate comparison with multi-metric hard gates.
+- Markdown, JSON, and TSV reporting with sensitive-path redaction.
+- Portable demonstration, user and developer guides, rule catalog, and citation metadata.
 
 ### Known limitations
 
-- V1 supports one diploid-oriented HiFi-only sample; it does not support Hi-C, trio, ONT,
-  polyploid optimization, scaffolding, annotation, or unbounded search.
+- Scope is HiFi-only single-sample assembly; Hi-C, trio, ONT, scaffolding, annotation, and
+  unbounded parameter search are unsupported.
 - Same-read k-mer evaluation is advisory rather than independent validation.
-- RAG/LLM explanations never authorize parameters or shell execution.
-- The retained Candida Stage 11 candidate is explicitly synthetic and not a scientific result.
+- Retrieval and model explanations never authorize parameters or shell execution.

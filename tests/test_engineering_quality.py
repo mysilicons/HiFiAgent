@@ -1,7 +1,11 @@
 import ast
 import json
 import re
+from collections import defaultdict
 from pathlib import Path
+from urllib.parse import unquote
+
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = PROJECT_ROOT / "src" / "hifi_agent"
@@ -9,15 +13,19 @@ CODE_ROOTS = (
     PROJECT_ROOT / "src",
     PROJECT_ROOT / "tests",
     PROJECT_ROOT / "scripts",
-    PROJECT_ROOT / "workflow",
     PROJECT_ROOT / "configs",
-    PROJECT_ROOT / "examples",
     PROJECT_ROOT / ".github",
 )
 CODE_SUFFIXES = {".config", ".j2", ".json", ".nf", ".py", ".sh", ".toml", ".yaml", ".yml"}
 GENERATION_MARKER = re.compile(r"(?i)(?<![A-Za-z0-9])v[123](?![A-Za-z0-9])")
 VERSIONED_CONTRACT_KEYS = tuple(
     f"{prefix}_{'version'}" for prefix in ("schema", "policy", "catalog", "parser")
+)
+MARKDOWN_FILES = (
+    PROJECT_ROOT / "README.md",
+    PROJECT_ROOT / "CONTRIBUTING.md",
+    PROJECT_ROOT / "CHANGELOG.md",
+    *sorted((PROJECT_ROOT / "docs").glob("*.md")),
 )
 
 
@@ -113,3 +121,97 @@ def test_public_policy_copy_matches_packaged_runtime_policy() -> None:
     public_policy = PROJECT_ROOT / "configs/comparison_policy.yaml"
     packaged_policy = PROJECT_ROOT / "src/hifi_agent/data/comparison_policy.yaml"
     assert public_policy.read_bytes() == packaged_policy.read_bytes()
+
+
+def _markdown_anchors(content: str) -> set[str]:
+    """Return GitHub-style heading anchors needed by local documentation links."""
+    anchors: set[str] = set()
+    counts: defaultdict[str, int] = defaultdict(int)
+    for heading in re.findall(r"^#{1,6}\s+(.+?)\s*$", content, flags=re.MULTILINE):
+        plain = re.sub(r"<[^>]+>", "", heading.replace("`", "")).strip().lower()
+        slug = "".join(
+            character for character in plain if character.isalnum() or character in " _-"
+        )
+        slug = re.sub(r"[\s]+", "-", slug)
+        count = counts[slug]
+        counts[slug] += 1
+        anchors.add(slug if count == 0 else f"{slug}-{count}")
+    return anchors
+
+
+def test_local_markdown_links_and_anchors_resolve() -> None:
+    """Keep every repository-local documentation target navigable."""
+    failures: list[str] = []
+    link_pattern = re.compile(r"(?<!!)\[[^\]]+\]\(([^()\s]+)\)")
+    for source in MARKDOWN_FILES:
+        content = source.read_text()
+        for raw_target in link_pattern.findall(content):
+            if re.match(r"^[a-z][a-z0-9+.-]*:", raw_target, flags=re.IGNORECASE):
+                continue
+            target_value = unquote(raw_target.strip("<>"))
+            path_value, separator, anchor = target_value.partition("#")
+            target = source if not path_value else (source.parent / path_value).resolve()
+            if not target.exists():
+                failures.append(f"{source.relative_to(PROJECT_ROOT)} -> missing {target_value}")
+                continue
+            missing_anchor = (
+                separator
+                and target.is_file()
+                and anchor not in _markdown_anchors(target.read_text())
+            )
+            if missing_anchor:
+                failures.append(
+                    f"{source.relative_to(PROJECT_ROOT)} -> missing anchor #{anchor} in "
+                    f"{target.relative_to(PROJECT_ROOT)}"
+                )
+    assert failures == []
+
+
+def test_documentation_yaml_fences_are_parseable() -> None:
+    """Reject malformed YAML in public documentation examples."""
+    failures: list[str] = []
+    for source in MARKDOWN_FILES:
+        for index, block in enumerate(
+            re.findall(r"```yaml\n(.*?)\n```", source.read_text(), flags=re.DOTALL),
+            start=1,
+        ):
+            try:
+                yaml.safe_load(block)
+            except yaml.YAMLError as exc:
+                failures.append(f"{source.relative_to(PROJECT_ROOT)} block {index}: {exc}")
+    assert failures == []
+
+
+def test_public_tree_has_no_project_specific_organisms_or_personal_paths() -> None:
+    """Prevent local acceptance subjects and developer paths from returning."""
+    excluded_roots = {".git", "Data", "cache", "dist", "logs", "results"}
+    text_suffixes = CODE_SUFFIXES | {".md", ".txt", ".tsv", ".cff"}
+    files = [
+        path
+        for path in PROJECT_ROOT.rglob("*")
+        if path.is_file()
+        and path.suffix in text_suffixes
+        and not excluded_roots.intersection(path.relative_to(PROJECT_ROOT).parts)
+    ]
+    organism_terms = tuple(
+        "".join(parts)
+        for parts in (
+            ("Droso", "phila"),
+            ("mela", "nogaster"),
+            ("Ma", "lus"),
+            ("domes", "tica"),
+            ("Can", "dida"),
+            ("albi", "cans"),
+            ("Zizi", "phus"),
+            ("ju", "juba"),
+        )
+    )
+    failures: list[str] = []
+    for path in files:
+        content = path.read_text(errors="replace")
+        for term in organism_terms:
+            if re.search(rf"\b{re.escape(term)}\b", content, flags=re.IGNORECASE):
+                failures.append(f"project-specific organism in {path.relative_to(PROJECT_ROOT)}")
+        if re.search(r"/(?:home|data)/gw(?:/|\b)", content):
+            failures.append(f"personal absolute path in {path.relative_to(PROJECT_ROOT)}")
+    assert failures == []

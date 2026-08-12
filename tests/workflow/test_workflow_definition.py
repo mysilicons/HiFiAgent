@@ -71,11 +71,11 @@ def test_local_profile_enables_execution_artifacts() -> None:
     assert "publish_overwrite = false" in local_config
 
 
-def test_large_local_host_resource_policy() -> None:
+def test_default_resource_policy_is_conservative_and_overridable() -> None:
     base_config = (WORKFLOW_DIR / "conf" / "base.config").read_text()
 
-    assert "max_threads = 480" in base_config
-    assert "max_memory_gb = 960" in base_config
+    assert "max_threads = 32" in base_config
+    assert "max_memory_gb = 128" in base_config
     assert "Math.min(256, params.max_threads as int)" in base_config
     assert "withName: NANOPLOT" in base_config
     assert "withName: MERQURY_POST_QC" in base_config

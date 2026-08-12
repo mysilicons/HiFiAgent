@@ -256,7 +256,8 @@ def test_receipts_detect_metadata_and_input_drift(tmp_path: Path) -> None:
 
 
 def test_paths_and_resource_bounds_are_enforced(tmp_path: Path) -> None:
-    assert ResourceConfig().max_threads == 480
+    assert ResourceConfig().max_threads == 32
+    assert ResourceConfig().max_memory_gb == 128
     data = _config(tmp_path)
     data["sample_id"] = "bad/sample"
     with pytest.raises(InputValidationError, match="sample_id"):

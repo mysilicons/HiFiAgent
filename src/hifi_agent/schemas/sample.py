@@ -32,9 +32,9 @@ class ResourceConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # Keep a small host reserve on the 512-thread/1-TiB local execution server.
-    max_threads: int = Field(default=480, ge=1)
-    max_memory_gb: int = Field(default=960, ge=1)
+    # Conservative defaults remain usable on a general-purpose assembly host.
+    max_threads: int = Field(default=32, ge=1)
+    max_memory_gb: int = Field(default=128, ge=1)
 
 
 class OptimizationConfig(BaseModel):
