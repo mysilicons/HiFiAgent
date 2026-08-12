@@ -264,10 +264,17 @@ def test_repository_generic_sample_is_a_valid_native_config(
     assert result.source_map["resources.max_threads"] == "runtime"
 
 
-def test_readme_yaml_example_is_schema_valid(tmp_path: Path) -> None:
-    readme = (PROJECT_ROOT / "README.md").read_text()
+@pytest.mark.parametrize(
+    ("readme_name", "configuration_heading"),
+    [("README.md", "Two-layer configuration"), ("README.zh-CN.md", "两层配置")],
+)
+def test_readme_yaml_example_is_schema_valid(
+    tmp_path: Path, readme_name: str, configuration_heading: str
+) -> None:
+    readme = (PROJECT_ROOT / readme_name).read_text()
     match = re.search(
-        r"## 两层配置.*?```yaml\n(?P<runtime>.*?)\n```.*?```yaml\n(?P<sample>.*?)\n```",
+        rf"## {re.escape(configuration_heading)}.*?```yaml\n"
+        r"(?P<runtime>.*?)\n```.*?```yaml\n(?P<sample>.*?)\n```",
         readme,
         re.DOTALL,
     )

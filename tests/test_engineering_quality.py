@@ -22,10 +22,8 @@ VERSIONED_CONTRACT_KEYS = tuple(
     f"{prefix}_{'version'}" for prefix in ("schema", "policy", "catalog", "parser")
 )
 MARKDOWN_FILES = (
-    PROJECT_ROOT / "README.md",
-    PROJECT_ROOT / "CONTRIBUTING.md",
-    PROJECT_ROOT / "CHANGELOG.md",
-    *sorted((PROJECT_ROOT / "docs").glob("*.md")),
+    *sorted(PROJECT_ROOT.glob("*.md")),
+    *sorted((PROJECT_ROOT / "docs").rglob("*.md")),
 )
 
 
@@ -164,6 +162,32 @@ def test_local_markdown_links_and_anchors_resolve() -> None:
                     f"{source.relative_to(PROJECT_ROOT)} -> missing anchor #{anchor} in "
                     f"{target.relative_to(PROJECT_ROOT)}"
                 )
+    assert failures == []
+
+
+def test_public_documentation_has_english_and_chinese_pairs() -> None:
+    """Keep English as the default while preserving a Chinese counterpart for every guide."""
+    expected_pairs = [
+        (PROJECT_ROOT / "README.md", PROJECT_ROOT / "README.zh-CN.md"),
+        (PROJECT_ROOT / "CONTRIBUTING.md", PROJECT_ROOT / "CONTRIBUTING.zh-CN.md"),
+        (PROJECT_ROOT / "CHANGELOG.md", PROJECT_ROOT / "CHANGELOG.zh-CN.md"),
+        *[
+            (english, PROJECT_ROOT / "docs" / "zh-CN" / english.name)
+            for english in sorted((PROJECT_ROOT / "docs").glob("*.md"))
+        ],
+    ]
+    failures: list[str] = []
+    for english, chinese in expected_pairs:
+        if not chinese.is_file():
+            failures.append(f"missing Chinese counterpart for {english.relative_to(PROJECT_ROOT)}")
+            continue
+        if str(chinese.relative_to(english.parent)) not in english.read_text():
+            failures.append(f"missing Chinese language link in {english.relative_to(PROJECT_ROOT)}")
+        expected_english_link = (
+            english.name if chinese.parent == PROJECT_ROOT else f"../{english.name}"
+        )
+        if expected_english_link not in chinese.read_text():
+            failures.append(f"missing English language link in {chinese.relative_to(PROJECT_ROOT)}")
     assert failures == []
 
 

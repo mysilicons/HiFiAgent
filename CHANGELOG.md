@@ -1,5 +1,7 @@
 # Changelog
 
+**English** | [简体中文](CHANGELOG.zh-CN.md)
+
 All notable changes are documented here. This project follows Semantic Versioning.
 
 ## [3.0.0] - 2026-08-13
