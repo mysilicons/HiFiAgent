@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -254,9 +254,10 @@ def verify_real_run(run_dir: Path, dataset: ResolvedDataset) -> RealRunAcceptanc
         comparison = RoundComparison.model_validate_json(comparison_path.read_text())
     except (OSError, ValidationError) as exc:
         raise InputValidationError(f"Real comparison is invalid: {exc}") from exc
-    if comparison.outcome not in {"ACCEPT_CANDIDATE", "KEEP_INCUMBENT"}:
+    comparison_outcome = comparison.outcome
+    if comparison_outcome not in ("ACCEPT_CANDIDATE", "KEEP_INCUMBENT"):
         raise InputValidationError(
-            f"Real comparison did not reach accept/reject/plateau: {comparison.outcome}"
+            f"Real comparison did not reach accept/reject/plateau: {comparison_outcome}"
         )
     if not comparison.reason_codes:
         raise InputValidationError("Real comparison lacks reason codes")
@@ -271,7 +272,7 @@ def verify_real_run(run_dir: Path, dataset: ResolvedDataset) -> RealRunAcceptanc
         baseline_attempt_ref=baseline.attempt_ref,
         candidate_attempt_ref=candidate.attempt_ref,
         changed_parameter=changed_parameter,
-        comparison_outcome=cast(Literal["ACCEPT_CANDIDATE", "KEEP_INCUMBENT"], comparison.outcome),
+        comparison_outcome=comparison_outcome,
         comparison_reason_codes=comparison.reason_codes,
         checks=(
             "DATASET_MANIFEST_MATCH",
