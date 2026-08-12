@@ -42,7 +42,7 @@ jobs:
         run: python scripts/run_portable_demo.py --workspace /tmp/hifi-agent-portable --scenario three-rounds
 
       - name: Build release distributions
-        run: python -m build --no-isolation
+        run: python -m build
 
       - name: Verify isolated wheel execution
         run: |
