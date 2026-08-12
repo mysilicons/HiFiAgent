@@ -11,7 +11,7 @@ From FASTQ to assembly, quality assessment, bounded parameter optimization, and 
 [![CI](https://github.com/mysilicons/HiFiAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/mysilicons/HiFiAgent/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/mysilicons/HiFiAgent?display_name=tag&sort=semver)](https://github.com/mysilicons/HiFiAgent/releases/latest)
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![License](https://img.shields.io/github/license/mysilicons/HiFiAgent)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [Quick start](#quick-start) · [Configuration](#two-layer-configuration) · [Verification](#results-and-verification) · [Documentation](#documentation) · [Contributing](CONTRIBUTING.md)
 
