@@ -1,68 +1,141 @@
-# HiFi Agent V3
+<div align="center">
 
-HiFi Agent V3 是面向单样本 PacBio HiFi 的受约束组装助手。公开运行配置由严格分离的
-`hifi-agent-sample` 物种文件与 `hifi-agent-runtime` 全局环境文件组成，解析后冻结为内部 canonical
-run；项目不包含旧版本控制器、Schema、迁移器、导出器或兼容执行入口。
+# HiFi Agent
 
-当前已实现并严格验收阶段 0～9，阶段 10 发布门禁正在执行：
+**面向单样本 PacBio HiFi 数据的受约束、可恢复、可审计基因组组装助手**
 
-- 原生 V3 配置、环境预检、不可变 run identity、事务状态日志、单写者锁和统一预算；
-- pre-QC 与 baseline 通过公开 `assemble` 的唯一 `RunCoordinator`；
-- baseline/candidate 共用 `AssemblyExecutor`、同一 Nextflow entry 和同一 post-QC contract；
-- attempt 内六件套参数契约、独立 work/publish/cache、inventory、完成 marker 和 retry/resume 语义；
-- typed `DecisionContext`、governed RAG、可选结构化 LLM、单参数 Safety Arbiter、incumbent overlay、
-  全局指纹去重和完整 proposal lineage；
-- `assemble` 自动完成 baseline review、最多三轮/每轮最多两个候选、受保护多指标比较、plateau、
-  budget、human-review 和失败终态；
-- 每个终态自动生成 Markdown、JSON、run/parameter/provenance TSV 和 deep verification report；
-- attempt/Nextflow cache 恢复、完成后故障恢复、单写者并发拒绝、账本幂等和损坏闭锁均有 portable
-  破坏性测试。
-- executable fixture 通过真实 CLI 子进程和磁盘边界完成 baseline + 三轮 candidate、round 2 resume、
-  recorded LLM replay，以及退出码 `0/3/4/5` 和报告一致性验收。
+从 FASTQ 到组装、质量评估、有限参数优化与终态报告，只需一个物种配置和一条命令。
 
-## 环境
+[![CI](https://github.com/mysilicons/HiFiAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/mysilicons/HiFiAgent/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/mysilicons/HiFiAgent?display_name=tag&sort=semver)](https://github.com/mysilicons/HiFiAgent/releases/latest)
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/github/license/mysilicons/HiFiAgent)](LICENSE)
 
-项目要求 Python 3.12。推荐使用仓库环境文件：
+[快速开始](#快速开始) · [配置说明](#两层配置) · [结果与验收](#结果与验收) · [用户文档](#文档) · [参与贡献](CONTRIBUTING.md)
 
-```bash
-conda env create -f environment.yml
-conda activate hifiAgent
-python -m pip install -e '.[dev]'
+</div>
+
+---
+
+HiFi Agent 将生产级组装流程中的输入验证、环境预检、pre-QC、hifiasm 组装、post-QC、受控参数
+搜索、结果比较和审计报告统一到一个命令中。它不会让模型直接执行命令，也不会进行无边界参数
+搜索；每个候选都必须通过固定 Schema、证据授权、安全仲裁、预算和参数合同。
+
+> [!IMPORTANT]
+> 当前范围是 Linux x86_64 上的单样本 PacBio HiFi 组装。Hi-C、ONT、trio、scaffolding、注释和
+> 临床用途不在支持范围内。输出表示“已执行候选中的最佳证据”，不代表全局参数最优。
+
+## 核心能力
+
+| 能力 | 说明 |
+|---|---|
+| 一条命令运行 | 只指定物种 YAML；首次运行创建任务，再次运行自动安全续跑 |
+| 两层严格配置 | 全局环境与物种科学信息完全分离，未知字段直接拒绝 |
+| 输入与环境门禁 | FASTQ、gzip、路径、SHA-256、工具版本、CPU、内存、磁盘和 BUSCO 谱系预检 |
+| 统一组装边界 | baseline 和 candidate 共用同一执行器、Nextflow 流程与 post-QC 合同 |
+| 有界参数优化 | 最多三轮、每轮最多两个候选、单候选只允许改变一个受控参数 |
+| 受保护指标比较 | BUSCO、k-mer、mapping 和 coverage 回退不能被 N50 提升覆盖 |
+| 安全恢复 | immutable identity、事务状态日志、单写者锁、幂等预算与 attempt-local cache |
+| 完整审计 | requested → approved → argv → realized 参数，以及 proposal → attempt → comparison 链 |
+| 终态深度验收 | 报告、manifest、哈希链、参数合同和产物 inventory 自动验证 |
+
+## 工作流程
+
+```mermaid
+flowchart LR
+    S[物种配置] --> V[输入验证]
+    R[全局配置] --> V
+    V --> E[环境预检]
+    E --> Q1[Pre-QC]
+    Q1 --> A[Baseline 组装]
+    A --> Q2[Post-QC]
+    Q2 --> D{质量评审}
+    D -->|需要且合规| C[单变量候选]
+    C --> A2[同源组装与 QC]
+    A2 --> M[受保护多指标比较]
+    M --> D
+    D -->|接受或停止| T[终态报告与深度验收]
 ```
 
-真实执行还要求环境预检中列出的 Nextflow、Java、hifiasm、gfatools、SeqKit、NanoPlot、meryl、
-QUAST、BUSCO、Merqury、minimap2、samtools、coverage backend、R 和 GenomeScope 工具。
+## 系统要求
 
-## 五分钟 portable quickstart
+- Python `3.12`
+- Linux x86_64
+- Java `21` 与 Nextflow `25.04.7`
+- hifiasm、gfatools、SeqKit、NanoPlot、meryl、QUAST、BUSCO、Merqury
+- minimap2、samtools、bedtools 或 mosdepth、R、GenomeScope
 
-以下命令不需要大型数据或付费 API。它会在指定目录安装独立的 fixture 可执行工具副本，并由真实
-`python -m hifi_agent assemble` 子进程完成 baseline 和三轮优化；测试套件会执行完全相同的入口。
+真实项目的 CPU、内存和磁盘需求取决于基因组大小、覆盖度与候选数量。提交任务前，`plan` 会验证
+配置资源是否超过当前主机能力。
+
+## 安装
+
+推荐使用仓库提供的 Conda 环境，以固定外部生物信息学工具版本：
+
+```bash
+git clone https://github.com/mysilicons/HiFiAgent.git
+cd HiFiAgent
+conda env create -f environment.yml
+conda activate hifiAgent
+python -m pip install .
+```
+
+也可以从 [GitHub Releases](https://github.com/mysilicons/HiFiAgent/releases/latest) 下载 wheel：
+
+```bash
+python -m pip install hifi_agent-3.0.0-py3-none-any.whl
+```
+
+wheel 只安装 Python 包；外部组装和 QC 工具仍需由 Conda 或系统环境提供。
+
+## 快速开始
+
+将数据放入全局 `data_root` 对应目录，例如：
+
+```text
+Data/
+└── Malus_domestica/
+    └── Malus_domestica_HiFi.fastq
+```
+
+仓库已经提供 [全局配置](configs/runtime.yaml) 和四个[物种示例](configs/samples)。先进行只读规划：
+
+```bash
+conda run --no-capture-output -n hifiAgent \
+  hifi-agent plan configs/samples/Malus_domestica.yaml
+```
+
+确认环境通过后启动完整流程：
+
+```bash
+conda run --no-capture-output -n hifiAgent \
+  hifi-agent assemble configs/samples/Malus_domestica.yaml
+```
+
+进程中断时，重新执行完全相同的命令即可。默认 `resume_mode: auto` 会验证配置快照、输入 checksum、
+run identity 和事务状态后，从原 attempt 安全恢复。
+
+### 无真实数据的可移植演示
+
+下面的命令会创建最小 FASTQ 和隔离 fixture 工具链，经由真实 CLI、控制器、文件合同和报告边界完成
+baseline 加三轮候选，可用于快速确认安装是否完整：
 
 ```bash
 python scripts/run_portable_demo.py --workspace /tmp/hifi-agent-portable --scenario three-rounds
 ```
 
-成功时脚本自身退出 `0`，输出 JSON 中的 `exit_codes` 为 `[0]`，run 的
-`06_report/final_summary.json` 为 `STOP_MAX_ROUNDS`。这只证明生产 wiring 可移植，不代表真实生物
-数据质量；真实数据和 live LLM 属于阶段 9。
-
-## Drosophila 真实验收
-
-阶段 9 已提供 `configs/drosophila_real_acceptance.yaml`、版本化 dataset registry、真实 run
-verifier、release-only pytest suite、live provider smoke 和 evidence builder。当前配置通过共享的
-`configs/runtime.yaml` 定位 `Data/`、`results/` 和缓存目录，固定使用 128 线程并把内存上限设为
-960 GB。完整的历史验收记录见
-[阶段 9 验收报告](docs/v3/stage9_acceptance.md)。run3 已在 clean commit 上完成真实 baseline、单变量
-candidate、同源 post-QC、comparison、live API、0-skip real suite 和 evidence bundle；deep/real verifier
-均为 PASS，科学结论为 `KEEP_INCUMBENT / STOP_PLATEAU`。这证明当前受限搜索空间内的真实闭环和审计
-链有效，不构成全局参数最优性声明。
+fixture 指标只验证软件 wiring，不能作为真实生物学结果。
 
 ## 两层配置
 
-运行参数只维护一次，放在全局环境配置中。路径均相对于该文件解析：
+### 1. 全局环境配置
+
+全局文件维护数据、输出和缓存根目录，以及所有样本共享的资源、优化、预算和工具策略。相对路径按
+该配置文件所在目录解析。
 
 ```yaml
 schema_id: hifi-agent-runtime
+
 paths:
   data_root: ../Data
   output_root: ../results
@@ -78,8 +151,10 @@ optimization:
   max_candidates_per_round: 1
   minimum_candidate_runs: 1
   max_parameter_changes_per_candidate: 1
+  plateau_rounds: 1
   decision_mode: rules_only
   require_llm: false
+  confirm_risk_level: medium_high
   retain_all_attempts: true
 
 execution_budget:
@@ -101,112 +176,126 @@ runtime:
   retention: standard
 ```
 
-每个物种文件只保存输入和科学元数据；输入路径必须是 `data_root` 下的安全相对路径：
+### 2. 物种配置
+
+物种文件只描述输入与科学事实。所有输入必须是 `data_root` 下的安全相对路径。
 
 ```yaml
 schema_id: hifi-agent-sample
 runtime_config: ../runtime.yaml
 sample_id: Malus_domestica
 read_technology: pacbio_hifi
+
 hifi_reads:
   - Malus_domestica/Malus_domestica_HiFi.fastq
+
 species_name: Malus domestica
 expected_genome_size: 650000000
 ploidy: 2
+inbred: null
 busco_lineage: eudicots_odb12
+kmer_reads: null
+reference_genome: null
 ```
 
-仓库已提供四个物种配置和 `examples/candida_sample_config.yaml`。`plan` 是只读操作，不创建 run：
+新物种只需复制一个样本文件并修改以下字段：
 
-```bash
-hifi-agent plan configs/samples/Malus_domestica.yaml
-```
+- `sample_id`：字母、数字、下划线或连字符；
+- `hifi_reads`：一个文件或多个 FASTQ/FASTQ.GZ；
+- `species_name`、`expected_genome_size`、`ploidy` 和 `inbred`；
+- `busco_lineage`：最接近的 BUSCO 分类谱系；
+- `reference_genome`：可选参考基因组，相对于 `data_root`。
 
-正式运行只需同一个入口。首次执行会新建 run；中断后再次执行同一条命令会自动校验 identity、输入
-checksum 和状态日志并续跑。缺失的 BUSCO lineage 会下载到共享缓存。`retention: standard` 只在深度
-验收 `PASS` 且进入终态后删除可再生的 workflow work 目录，保留 assembly、QC、参数、日志和审计证据。
+无需为每个物种重复线程、内存、工具路径和预算设置。缺失的 BUSCO lineage 会在共享缓存中加锁下载。
 
-## 命令
+## 命令行
 
-```bash
-hifi-agent validate configs/samples/Malus_domestica.yaml
-hifi-agent plan configs/samples/Malus_domestica.yaml
-hifi-agent assemble configs/samples/Malus_domestica.yaml
-hifi-agent verify-run /path/to/results/sample --deep
-```
+| 命令 | 用途 |
+|---|---|
+| `hifi-agent validate SAMPLE.yaml` | 验证配置和输入，并生成 checksum/receipt |
+| `hifi-agent plan SAMPLE.yaml` | 只读解析配置并执行环境预检 |
+| `hifi-agent assemble SAMPLE.yaml` | 执行或自动恢复完整组装闭环 |
+| `hifi-agent verify-run RUN_DIR --deep` | 重新验证 identity、日志、预算、合同与产物 |
+| `hifi-agent --help` | 查看完整命令和高级选项 |
 
-`--resume` 仍可用于全局策略设为 `explicit` 的高级场景；默认共享配置不需要该参数。
+默认 `rules_only` 不需要 API。`hybrid` 模式只允许模型生成严格 JSON proposal；模型没有执行端口，
+所有提案仍需经过相同的证据、安全、预算和参数合同门禁。
 
-决策模式为 `rules_only`、`llm_disabled` 或 `hybrid`。只有 `hybrid` 可使用 LLM，且
-`require_llm: true` 只允许与 `hybrid` 同时配置。在线 API key 只从环境变量读取，不写入 run、日志或
-报告。高级离线审计可在 `hybrid` 下配置 checksummed `llm_replay_transcript`；它按 round 绑定响应，
-仍经过同一个 Schema 和 Safety Arbiter。
-
-高级 CLI 选项在 `--help` 中标为 `Advanced`。V2 命令与别名已删除，不提供 deprecated 兼容入口；
-旧 run 也不会由 V3 读取或迁移。
-
-## Canonical attempt
+## 输出目录
 
 ```text
-02_assembly/baseline/attempt_001/
-├── metadata/
-├── contract/
-│   ├── requested_config.json
-│   ├── approved_config.json
-│   ├── rendered_argv.json
-│   ├── hifiasm_command.txt
-│   ├── realized_parameters.json
-│   └── parameter_contract_check.json
-├── workflow/
-├── assembly/
-├── post_qc/
-├── artifacts_manifest.json
-├── attempt_manifest.json
-└── COMPLETED.json
+results/<sample_id>/
+├── 00_metadata/       # 配置快照、输入 checksum、identity、环境与保留策略回执
+├── 01_pre_qc/         # reads 与 k-mer 预评估
+├── 02_assembly/       # baseline 和所有 candidate attempt
+├── 03_post_qc/        # 统一 QC 产物
+├── 04_decisions/      # 规则、证据、proposal、安全决定与比较
+├── 05_agent/          # 权威状态、事件、预算、manifest history 与单写者锁
+└── 06_report/         # 终态 Markdown、JSON、TSV 与 verification report
 ```
 
-中断恢复复用同一 attempt 和 Nextflow cache；确定性工具失败重试创建新的 `attempt_NNN`。没有完成
-marker、inventory 漂移或参数契约失败的 attempt 永远不能进入比较。
+`retention: standard` 只在进入终态且 deep verification 为 `PASS` 后删除可再生的 workflow work
+目录；assembly、QC、参数、日志和审计证据都会保留。
 
-## Canonical terminal reports
+## 结果与验收
 
-`assemble` 只在生成并内部验证以下报告后进入 `TERMINAL`：
-
-```text
-06_report/
-├── final_report.md
-├── final_summary.json
-├── all_runs.tsv
-├── all_parameters.tsv
-├── provenance.tsv
-└── verification_report.json
-```
-
-`final_summary.json` 包含终态类别和进程退出码、完整 incumbent 链、全部 attempt、approved/rejected/
-未执行 proposal、requested/approved/rendered/realized 参数、LLM receipt 摘要及预算预留/实际消耗。
-退出码为 `0`（科学终态）、`3`（需要人工动作）、`4`（工具/完整性失败）或 `5`（必需 LLM 失败）。
-
-## 开发验收
+终态后首先检查：
 
 ```bash
-ruff check .
-ruff format --check .
-mypy
-pytest --cov --cov-report=term-missing --cov-fail-under=85
-pytest -q --cov=hifi_agent.orchestration.controller \
-  --cov=hifi_agent.orchestration.comparison \
-  --cov=hifi_agent.orchestration.verifier \
-  --cov=hifi_agent.reporting --cov=hifi_agent.decision.rules \
-  --cov-branch --cov-fail-under=90
-nextflow config src/hifi_agent/data/workflow
-nextflow lint -output concise src/hifi_agent/data/workflow
+hifi-agent verify-run results/Malus_domestica --deep
 ```
 
-用户操作细节见 [Quickstart](docs/v3/quickstart.md)、
-[决策模式](docs/v3/decision_modes.md)、[恢复](docs/v3/resume_and_recovery.md)、
-[预算](docs/v3/budgets.md) 与 [结果解释](docs/v3/result_interpretation.md)。阶段 5–8 的实现、恢复矩阵和
-逐项证据见
-[严格验收报告](docs/v3/stage5_stage7_acceptance.md)、
-[阶段 8 验收报告](docs/v3/stage8_acceptance.md)、
-[恢复矩阵](docs/v3/recovery_matrix.md) 与
-[需求追踪矩阵](docs/v3/requirements_traceability.md)。
+然后阅读：
+
+- `06_report/final_report.md`：面向人的总结；
+- `06_report/final_summary.json`：机器可读终态与 incumbent；
+- `06_report/all_runs.tsv`：全部 attempt 和关键指标；
+- `06_report/all_parameters.tsv`：requested/approved/rendered/realized 参数；
+- `06_report/provenance.tsv`：输入、决策、运行和比较来源；
+- `06_report/verification_report.json`：完整性验收结果。
+
+| 退出码 | 含义 |
+|---:|---|
+| `0` | 科学流程正常接受或停止；不表示全局最优 |
+| `2` | 输入或配置验证失败 |
+| `3` | 需要人工动作，例如预算或风险确认 |
+| `4` | 工具、参数合同或完整性失败 |
+| `5` | 配置为必需的外部决策服务失败 |
+
+## 项目结构
+
+```text
+HiFiAgent/
+├── configs/           # 全局运行配置、样本模板与比较策略
+├── docs/              # 用户指南、架构和专家规则
+├── examples/          # 最小配置示例
+├── scripts/           # 可移植演示
+├── src/hifi_agent/    # Python 包、Nextflow 和治理知识快照
+├── tests/             # 单元、集成、恢复与工作流测试
+├── environment.yml    # 推荐 Conda 环境
+└── pyproject.toml     # Python 包与质量门禁
+```
+
+## 文档
+
+- [快速开始](docs/quickstart.md)
+- [配置与决策模式](docs/decision-modes.md)
+- [资源与预算](docs/resource-budgets.md)
+- [自动续跑与故障恢复](docs/resume-and-recovery.md)
+- [结果解释](docs/result-interpretation.md)
+- [系统架构](docs/architecture.md)
+- [专家规则标准](docs/expert_rules.md)
+
+## 参与贡献
+
+欢迎提交 issue 和 pull request。开始开发前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，并确保变更
+通过 Ruff、MyPy、pytest、覆盖率和可移植闭环测试。请勿提交 FASTQ、BAM/CRAM、组装数据库、BUSCO
+下载、API key 或包含个人绝对路径的运行产物。
+
+## 引用
+
+项目信息位于 [CITATION.cff](CITATION.cff)。GitHub 页面可通过 **Cite this repository** 导出引用。
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。第三方生物信息学工具与数据遵循各自的许可证和使用条款。

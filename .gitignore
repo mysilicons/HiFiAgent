@@ -55,6 +55,18 @@ src/hifi_agent/data/**/*.py[cod]
 .DS_Store
 *.swp
 *.swo
+/.vscode/
+
+# Internal planning, acceptance, and source-research artifacts
+/HiFi_Agent_*_Project_Plan.md
+/HiFi_Agent_*_Compliance_Assessment.md
+/docs/adr/
+/docs/v[0-9]*/
+/benchmark/reports/
+/document/
+/configs/*_real_acceptance.yaml
+/configs/knowledge_sources.yaml
+/scripts/build_release_bundle.py
 
 # DataSets
 Data/

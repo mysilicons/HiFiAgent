@@ -1,8 +1,8 @@
-# V3 architecture
+# 系统架构
 
 ```mermaid
 flowchart LR
-  I[Native V3 YAML + checksummed inputs] --> V[Validation + environment preflight]
+  I[Strict YAML + checksummed inputs] --> V[Validation + environment preflight]
   V --> ID[Immutable identity]
   ID --> C[RunCoordinator\nauthoritative phase ordering]
   C --> P[Pre-QC]
@@ -46,5 +46,5 @@ input checksum → identity → state/event/budget → decision context
 → comparison/incumbent chain → terminal reports → deep verification
 ```
 
-Stage-8 executable fixture 与真实工具使用相同进程和文件边界，仅替换显式配置的工具二进制。它不绕过
-preflight、executor、parser、comparator 或 reporter，也不作为阶段 9 的真实生物数据证据。
+可移植 executable fixture 与真实工具使用相同进程和文件边界，仅替换显式配置的工具二进制。它不
+绕过 preflight、executor、parser、comparator 或 reporter，也不能作为真实生物数据结论。
