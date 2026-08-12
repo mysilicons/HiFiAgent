@@ -1,5 +1,5 @@
 schema_id: hifi-agent-sample
-runtime_config: ../configs/runtime.yaml
+runtime_config: ../runtime.yaml
 sample_id: Candida_albicans
 read_technology: pacbio_hifi
 hifi_reads:

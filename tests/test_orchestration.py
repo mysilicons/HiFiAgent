@@ -942,6 +942,78 @@ def test_round_two_interruption_resumes_same_attempt_without_rebilling(
     assert ledger.reserved[BudgetResource.ASSEMBLY] == 0
 
 
+def test_auto_resume_uses_the_same_command_and_attempt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path, optimization={"max_rounds": 0, "enabled": False})
+    data = yaml.safe_load(config.read_text())
+    data["runtime"] = {"resume_mode": "auto", "retention": "full"}
+    config.write_text(yaml.safe_dump(data))
+    runner = MetricsRunner(["interrupt", _complete_metrics(busco_complete=98.0)])
+
+    with pytest.raises(InterruptedExecutionError):
+        _coordinator(config, runner, monkeypatch).run()
+
+    result = _coordinator(config, runner, monkeypatch).run()
+
+    assert result.state.terminal_outcome == "ACCEPTED_BASELINE"
+    assert len(runner.calls) == 2
+    assert runner.calls[-1].resume is True
+    assert runner.calls[-1].attempt_id.endswith("attempt_001")
+
+
+def test_auto_resume_rejects_raw_configuration_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path, optimization={"max_rounds": 0, "enabled": False})
+    data = yaml.safe_load(config.read_text())
+    data["runtime"] = {"resume_mode": "auto", "retention": "full"}
+    config.write_text(yaml.safe_dump(data))
+    runner = MetricsRunner([_complete_metrics(busco_complete=98.0)])
+    _coordinator(config, runner, monkeypatch).run()
+    config.write_text(config.read_text() + "# operator edit\n")
+
+    with pytest.raises(AgentStateError, match="differs from the immutable run snapshot"):
+        _coordinator(config, runner, monkeypatch).run()
+
+
+def test_coordinator_applies_standard_retention_only_after_terminal_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class WorkMetricsRunner(MetricsRunner):
+        def run(self, invocation: WorkflowInvocation) -> WorkflowResult:
+            work = invocation.attempt_root / "workflow/work/task/cache.bin"
+            work.parent.mkdir(parents=True, exist_ok=True)
+            work.write_text("regenerable")
+            return super().run(invocation)
+
+    config = _config(tmp_path, optimization={"max_rounds": 0, "enabled": False})
+    data = yaml.safe_load(config.read_text())
+    data["runtime"] = {"resume_mode": "auto", "retention": "standard"}
+    config.write_text(yaml.safe_dump(data))
+    runner = WorkMetricsRunner([_complete_metrics(busco_complete=98.0)])
+    coordinator = _coordinator(config, runner, monkeypatch)
+
+    def pre_qc_with_work(sample: SampleConfig, *, resume: bool) -> AssemblyInputManifest:
+        manifest = _pre_qc(sample, resume=resume)
+        work = sample.outdir / "01_pre_qc/work/task/cache.bin"
+        work.parent.mkdir(parents=True, exist_ok=True)
+        work.write_text("regenerable")
+        return manifest
+
+    coordinator.pre_qc_runner = pre_qc_with_work
+    result = coordinator.run()
+
+    assert result.state.state == RunPhase.TERMINAL
+    assert not (tmp_path / "run/01_pre_qc/work").exists()
+    assert not (tmp_path / "run/02_assembly/baseline/attempt_001/workflow/work").exists()
+    assert (tmp_path / "run/00_metadata/retention_receipt.json").is_file()
+    assert verify_run(tmp_path / "run", deep=True).status == "PASS"
+
+
 def test_completed_candidate_survives_post_launch_controller_fault_without_rerun(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

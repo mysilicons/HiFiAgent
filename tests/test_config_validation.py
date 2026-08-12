@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+import hifi_agent.config as config_module
 from hifi_agent.config import (
     validate_config_file,
     verify_recorded_input_checksums,
@@ -37,6 +38,50 @@ def _write(tmp_path: Path, data: dict[str, object]) -> Path:
     return path
 
 
+def _split_config(tmp_path: Path) -> tuple[Path, Path, Path]:
+    config_root = tmp_path / "config"
+    sample_root = config_root / "samples"
+    data_root = tmp_path / "Data"
+    sample_root.mkdir(parents=True)
+    data_root.mkdir()
+    reads = _fastq(data_root / "reads.fastq")
+    runtime = config_root / "runtime.yaml"
+    runtime.write_text(
+        yaml.safe_dump(
+            {
+                "schema_id": "hifi-agent-runtime",
+                "paths": {
+                    "data_root": "../Data",
+                    "output_root": "../results",
+                    "cache_root": "../cache",
+                },
+                "resources": {"max_threads": 8, "max_memory_gb": 32},
+                "execution_budget": {"min_free_disk_gib": 0},
+                "tools": {"busco_cache": "busco"},
+                "runtime": {"resume_mode": "auto", "retention": "standard"},
+            },
+            sort_keys=False,
+        )
+    )
+    sample = sample_root / "sample.yaml"
+    sample.write_text(
+        yaml.safe_dump(
+            {
+                "schema_id": "hifi-agent-sample",
+                "runtime_config": "../runtime.yaml",
+                "sample_id": "sample_01",
+                "read_technology": "pacbio_hifi",
+                "hifi_reads": [reads.name],
+                "species_name": "Test species",
+                "expected_genome_size": 1000,
+                "ploidy": 2,
+            },
+            sort_keys=False,
+        )
+    )
+    return sample, runtime, reads
+
+
 def test_native_validation_writes_all_identity_inputs(tmp_path: Path) -> None:
     result = validate_config_file(_write(tmp_path, _config(tmp_path)))
 
@@ -49,6 +94,84 @@ def test_native_validation_writes_all_identity_inputs(tmp_path: Path) -> None:
     assert manifest["schema_id"] == "hifi-agent"
     assert receipt["schema_id"] == "hifi-agent"
     assert receipt["read_technology_source"] == "USER_DECLARED_NOT_INFERRED"
+
+
+def test_split_configuration_resolves_non_overlapping_roots_and_sources(tmp_path: Path) -> None:
+    sample, runtime, reads = _split_config(tmp_path)
+
+    result = validate_config_file(sample)
+
+    assert result.config.hifi_reads == [reads.resolve()]
+    assert result.config.outdir == (tmp_path / "results/sample_01").resolve()
+    assert result.config.tools.busco_lineage_dir == (tmp_path / "cache/busco").resolve()
+    assert result.config.resources.max_threads == 8
+    assert result.config.runtime.resume_mode == "auto"
+    assert result.config.runtime.retention == "standard"
+    assert result.source_config == sample.resolve()
+    assert result.runtime_source_config == runtime.resolve()
+    assert result.field_sources["species_name"] == "sample"
+    assert result.field_sources["resources.max_threads"] == "runtime"
+    assert result.sample_config_snapshot.read_bytes() == sample.read_bytes()
+    assert result.runtime_config_snapshot is not None
+    assert result.runtime_config_snapshot.read_bytes() == runtime.read_bytes()
+    verify_validation_receipt(result.config, result.validation_receipt)
+
+
+def test_split_configuration_rejects_ownership_violations_and_path_escape(
+    tmp_path: Path,
+) -> None:
+    sample, runtime, _reads = _split_config(tmp_path)
+    sample_data = yaml.safe_load(sample.read_text())
+    sample_data["resources"] = {"max_threads": 2}
+    sample.write_text(yaml.safe_dump(sample_data))
+    with pytest.raises(InputValidationError, match="resources"):
+        validate_config_file(sample, write_outputs=False)
+
+    sample_data.pop("resources")
+    sample_data["hifi_reads"] = ["../outside.fastq"]
+    sample.write_text(yaml.safe_dump(sample_data))
+    with pytest.raises(InputValidationError, match="relative to runtime data_root"):
+        validate_config_file(sample, write_outputs=False)
+
+    sample_data["hifi_reads"] = ["reads.fastq"]
+    sample.write_text(yaml.safe_dump(sample_data))
+    runtime_data = yaml.safe_load(runtime.read_text())
+    runtime_data["species_name"] = "wrong owner"
+    runtime.write_text(yaml.safe_dump(runtime_data))
+    with pytest.raises(InputValidationError, match="species_name"):
+        validate_config_file(sample, write_outputs=False)
+
+
+def test_split_configuration_reports_missing_runtime_file(tmp_path: Path) -> None:
+    sample, runtime, _reads = _split_config(tmp_path)
+    runtime.unlink()
+
+    with pytest.raises(InputValidationError, match="Runtime configuration does not exist"):
+        validate_config_file(sample, write_outputs=False)
+
+
+def test_each_unique_input_is_hashed_once_per_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sample, _runtime, reads = _split_config(tmp_path)
+    sample_data = yaml.safe_load(sample.read_text())
+    sample_data["kmer_reads"] = [reads.name]
+    sample.write_text(yaml.safe_dump(sample_data))
+    original = config_module._sha256
+    calls: list[Path] = []
+
+    def tracked(path: Path) -> str:
+        if path.resolve() == reads.resolve():
+            calls.append(path.resolve())
+        return original(path)
+
+    monkeypatch.setattr(config_module, "_sha256", tracked)
+
+    result = validate_config_file(sample)
+
+    assert calls == [reads.resolve()]
+    assert len(json.loads(result.input_manifest.read_text())["entries"]) == 2
 
 
 def test_single_read_string_is_normalized_to_a_list(tmp_path: Path) -> None:

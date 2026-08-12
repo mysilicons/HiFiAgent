@@ -1,0 +1,13 @@
+schema_id: hifi-agent-sample
+runtime_config: ../runtime.yaml
+sample_id: Ziziphus_Mill
+read_technology: pacbio_hifi
+hifi_reads:
+  - Ziziphus_Mill/Ziziphus_Mill_HiFi.fastq
+species_name: Ziziphus jujuba
+expected_genome_size: 444000000
+ploidy: 2
+inbred: null
+busco_lineage: eudicots_odb12
+kmer_reads: null
+reference_genome: null

@@ -32,6 +32,7 @@ from hifi_agent.executors.nextflow import (
     run_pre_qc_workflow,
 )
 from hifi_agent.orchestration.budget import BudgetLedger, BudgetLimits
+from hifi_agent.orchestration.busco_cache import prepare_busco_lineage
 from hifi_agent.orchestration.comparison import (
     RoundComparator,
 )
@@ -97,13 +98,14 @@ from hifi_agent.orchestration.manifests import (
     AssemblyAttemptRecord,
     ManifestStore,
 )
+from hifi_agent.orchestration.retention import apply_retention
 from hifi_agent.orchestration.runtime_config import (
     DecisionMode,
     EffectiveRuntimeConfig,
     RuntimeConfigResult,
     resolve_runtime_config,
 )
-from hifi_agent.orchestration.runtime_models import RunIdentity, RunPhase, RunState
+from hifi_agent.orchestration.runtime_models import RunIdentity, RunPhase, RunState, sha256_file
 from hifi_agent.schemas.assembly import (
     AssemblyConfig,
     RiskLevel,
@@ -150,7 +152,11 @@ class RunCoordinator:
         )
         run_dir = preview.effective.sample.outdir.resolve()
         identity_store = IdentityStore(run_dir)
-        if resume:
+        effective_resume = resume or (
+            preview.effective.sample.runtime.resume_mode == "auto"
+            and identity_store.identity_path.is_file()
+        )
+        if effective_resume:
             if not identity_store.identity_path.is_file():
                 raise AgentStateError("current resume requires an existing immutable identity")
             runtime, identity, state = self._resume(preview, identity_store)
@@ -167,15 +173,15 @@ class RunCoordinator:
             run_uuid=identity.run_uuid,
             command=["hifi-agent", "assemble", str(self.config_path)],
         )
-        lock.acquire(takeover_stale=resume)
+        lock.acquire(takeover_stale=effective_resume)
         try:
             try:
-                return self._advance(runtime, identity, state)
+                result = self._advance(runtime, identity, state)
             except InterruptedExecutionError:
                 raise
             except ToolExecutionError as exc:
                 current = StateStore(run_dir).load()
-                return self._enter_reporting(
+                result = self._enter_reporting(
                     current,
                     outcome="FAILED_TOOL",
                     outcome_class="FAILED",
@@ -185,7 +191,7 @@ class RunCoordinator:
             except RuleEvaluationError as exc:
                 current = StateStore(run_dir).load()
                 required = runtime.effective.optimization.require_llm
-                return self._enter_reporting(
+                result = self._enter_reporting(
                     current,
                     outcome=("FAILED_REQUIRED_LLM" if required else "STOP_INSUFFICIENT_EVIDENCE"),
                     outcome_class=("FAILED" if required else "SCIENTIFIC"),
@@ -200,13 +206,19 @@ class RunCoordinator:
                 if "budget exhausted" not in str(exc).lower():
                     raise
                 current = StateStore(run_dir).load()
-                return self._enter_reporting(
+                result = self._enter_reporting(
                     current,
                     outcome="STOP_BUDGET",
                     outcome_class="ACTION_REQUIRED",
                     reason_codes=["PRELAUNCH_BUDGET_EXHAUSTED"],
                     last_error=str(exc),
                 )
+            apply_retention(
+                result.run_dir,
+                policy=runtime.effective.sample.runtime.retention,
+                state=result.state.state,
+            )
+            return result
         finally:
             lock.release()
 
@@ -217,6 +229,7 @@ class RunCoordinator:
             write_outputs=True,
         )
         sample = runtime.effective.sample
+        prepare_busco_lineage(sample)
         environment = run_environment_preflight(sample)
         require_environment_preflight(environment)
         environment_path = materialize_environment_manifest(
@@ -238,6 +251,8 @@ class RunCoordinator:
             environment_manifest=environment_path,
             comparison_policy=policy_path,
             rag_index=rag_path,
+            sample_config=runtime.validation.sample_config_snapshot,
+            runtime_config=runtime.validation.runtime_config_snapshot,
         )
         IdentityStore(sample.outdir).initialize(identity)
         state = StateStore(sample.outdir).initialize(identity)
@@ -253,6 +268,20 @@ class RunCoordinator:
         identity_store: IdentityStore,
     ) -> tuple[RuntimeConfigResult, RunIdentity, RunState]:
         identity = identity_store.verify_snapshots(write_drift_receipt=True)
+        if (
+            identity.sample_config_sha256 is not None
+            and sha256_file(preview.validation.source_config) != identity.sample_config_sha256
+        ):
+            raise AgentStateError("Sample configuration differs from the immutable run snapshot")
+        if identity.runtime_config_sha256 is not None:
+            runtime_source = preview.validation.runtime_source_config
+            if (
+                runtime_source is None
+                or sha256_file(runtime_source) != identity.runtime_config_sha256
+            ):
+                raise AgentStateError(
+                    "Runtime configuration differs from the immutable run snapshot"
+                )
         try:
             persisted = EffectiveRuntimeConfig.model_validate_json(
                 preview.effective_config_path.read_text()

@@ -28,6 +28,7 @@ dag.*
 # Project outputs and large data
 results/
 logs/
+cache/
 data/
 !src/hifi_agent/data/
 !src/hifi_agent/data/**

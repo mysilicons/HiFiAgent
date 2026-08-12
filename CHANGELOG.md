@@ -2,7 +2,7 @@
 
 All notable changes are documented here. This project follows Semantic Versioning.
 
-## [3.0.0] - 2026-08-12
+## [3.0.0] - 2026-08-13
 
 ### Added
 
@@ -17,6 +17,9 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Package-owned Nextflow, comparison-policy, and governed-knowledge resources so the wheel runs
   independently from a source checkout.
 - Release wheel/sdist build and isolated-wheel portable execution gates.
+- Strictly separated shared runtime and per-species configuration files with one-command runs.
+- Lock-protected on-demand BUSCO lineage caching, immutable source snapshots, and automatic resume.
+- Post-verification standard retention that removes only regenerable workflow work directories.
 
 ### Changed
 

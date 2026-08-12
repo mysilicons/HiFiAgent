@@ -232,34 +232,62 @@ def test_validation_receipt_marks_technology_as_declared_not_inferred(tmp_path: 
 
 
 def test_repository_candida_example_is_a_valid_native_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    data_root = tmp_path / "external-data"
+    data_root = tmp_path / "Data"
     sample_root = data_root / "Candida_albicans"
     sample_root.mkdir(parents=True)
     _fastq(sample_root / "Candida_albicans_HiFi.fastq")
     (sample_root / "Candida_albicans_gnome.fasta").write_text(">reference\nACGT\n")
-    monkeypatch.setenv("HIFI_AGENT_DATA_ROOT", str(data_root))
-    result = resolve_runtime_config(
-        PROJECT_ROOT / "examples/candida_sample_config.yaml",
-        write_outputs=False,
-    )
+    runtime_data = yaml.safe_load((PROJECT_ROOT / "configs/runtime.yaml").read_text())
+    runtime_data["paths"] = {
+        "data_root": str(data_root),
+        "output_root": str(tmp_path / "results"),
+        "cache_root": str(tmp_path / "cache"),
+    }
+    runtime_data["execution_budget"]["min_free_disk_gib"] = 0
+    runtime = tmp_path / "runtime.yaml"
+    runtime.write_text(yaml.safe_dump(runtime_data))
+    sample_data = yaml.safe_load((PROJECT_ROOT / "examples/candida_sample_config.yaml").read_text())
+    sample_data["runtime_config"] = str(runtime)
+    sample = tmp_path / "candida.yaml"
+    sample.write_text(yaml.safe_dump(sample_data))
+
+    result = resolve_runtime_config(sample, write_outputs=False)
 
     assert result.effective.sample.schema_id == "hifi-agent"
     assert result.effective.sample.hifi_reads[0].name == "Candida_albicans_HiFi.fastq"
-    assert result.effective.maximum_planned_assemblies() == 4
+    assert result.effective.maximum_planned_assemblies() == 2
+    assert result.source_map["species_name"] == "sample"
+    assert result.source_map["resources.max_threads"] == "runtime"
 
 
 def test_readme_yaml_example_is_schema_valid(tmp_path: Path) -> None:
     readme = (PROJECT_ROOT / "README.md").read_text()
-    match = re.search(r"配置示例.\n\n```yaml\n(?P<yaml>.*?)\n```", readme, re.DOTALL)
+    match = re.search(
+        r"## 两层配置.*?```yaml\n(?P<runtime>.*?)\n```.*?```yaml\n(?P<sample>.*?)\n```",
+        readme,
+        re.DOTALL,
+    )
     assert match is not None
-    data = yaml.safe_load(match.group("yaml"))
-    data["hifi_reads"] = [str(_fastq(tmp_path / "readme.fastq"))]
-    data["outdir"] = str(tmp_path / "readme-run")
-    path = tmp_path / "readme.yaml"
-    path.write_text(yaml.safe_dump(data))
+    data_root = tmp_path / "Data"
+    data_root.mkdir()
+    _fastq(data_root / "readme.fastq")
+    runtime_data = yaml.safe_load(match.group("runtime"))
+    runtime_data["paths"] = {
+        "data_root": str(data_root),
+        "output_root": str(tmp_path / "results"),
+        "cache_root": str(tmp_path / "cache"),
+    }
+    runtime_data["execution_budget"]["min_free_disk_gib"] = 0
+    runtime = tmp_path / "runtime.yaml"
+    runtime.write_text(yaml.safe_dump(runtime_data))
+    sample_data = yaml.safe_load(match.group("sample"))
+    sample_data["runtime_config"] = str(runtime)
+    sample_data["hifi_reads"] = ["readme.fastq"]
+    sample = tmp_path / "sample.yaml"
+    sample.write_text(yaml.safe_dump(sample_data))
 
-    result = resolve_runtime_config(path)
+    result = resolve_runtime_config(sample)
 
     assert result.effective.sample.schema_id == "hifi-agent"

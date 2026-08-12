@@ -21,12 +21,15 @@ wiring、恢复、契约和报告，不能替代真实数据验收。
 
 ## 真实运行
 
-1. 复制 `examples/candida_sample_config.yaml`，将 reads、reference、outdir 和资源改为本机值；
-2. 用 `hifi-agent validate sample.yaml` 生成输入 checksum 和验证 receipt；
-3. 用 `hifi-agent plan sample.yaml` 完成只读环境预检；
-4. 用 `hifi-agent assemble sample.yaml` 运行；
-5. 中断后只对同一个 YAML 使用 `--resume`；
-6. 结束后运行 `hifi-agent verify-run RUN_DIR --deep`。
+1. 在 `configs/runtime.yaml` 中一次性设置 data/output/cache 根目录、128 线程、内存、预算和工具；
+2. 复制 `configs/samples/Malus_domestica.yaml`，只修改 reads 和物种科学元数据；
+3. 用 `hifi-agent plan configs/samples/Malus_domestica.yaml` 完成只读环境预检；
+4. 用 `hifi-agent assemble configs/samples/Malus_domestica.yaml` 完整运行；
+5. 中断后原样重发第 4 步命令，`resume_mode: auto` 会验证不可变证据并续跑；
+6. 结束后运行 `hifi-agent verify-run results/Malus_domestica --deep`。
+
+样本路径只能是全局 `data_root` 下的相对路径。首次运行若缺少声明的 BUSCO lineage，会在共享
+`cache_root` 中加锁下载。标准保留策略只在 deep verification 为 `PASS` 后清除可再生的 work 目录。
 
 不要把 fixture 的指标或 `STOP_MAX_ROUNDS` 当作生物学结论。真实结果应按
 [结果解释](result_interpretation.md)审阅。

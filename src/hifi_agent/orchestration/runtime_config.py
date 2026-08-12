@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
-import yaml
 from pydantic import BaseModel, ConfigDict
 
 from hifi_agent.config import ConfigValidationResult, validate_config_file
@@ -21,7 +21,7 @@ from hifi_agent.schemas.sample import (
 )
 
 DecisionMode = Literal["rules_only", "hybrid", "llm_disabled"]
-ConfigSource = Literal["cli", "config", "default"]
+ConfigSource = Literal["cli", "sample", "runtime", "config", "default"]
 
 
 class EffectiveRuntimeConfig(BaseModel):
@@ -175,20 +175,17 @@ def resolve_runtime_config(
     write_outputs: bool = False,
 ) -> RuntimeConfigResult:
     """Validate and resolve one config without silently accepting semantic conflicts."""
-    raw = _load_raw_mapping(config_path)
     validation = validate_config_file(config_path, write_outputs=write_outputs)
     config = validation.config
-    optimization_raw = _nested_mapping(raw, "optimization")
-    budget_raw = _nested_mapping(raw, "execution_budget")
 
     optimization, optimization_sources = _resolve_optimization(
         config,
-        optimization_raw=optimization_raw,
+        field_sources=validation.field_sources,
         decision_mode_override=decision_mode_override,
     )
     budget, budget_sources = _resolve_budget(
         config,
-        budget_raw=budget_raw,
+        field_sources=validation.field_sources,
     )
     effective_sample = config.model_copy(
         update={
@@ -204,8 +201,7 @@ def resolve_runtime_config(
         execution_budget=budget,
     )
     source_map: dict[str, ConfigSource] = {
-        "schema_id": "config",
-        "read_technology": "config",
+        **validation.field_sources,
         **optimization_sources,
         **budget_sources,
     }
@@ -233,7 +229,7 @@ def resolve_runtime_config(
 def _resolve_optimization(
     config: SampleConfig,
     *,
-    optimization_raw: dict[str, object],
+    field_sources: Mapping[str, ConfigSource],
     decision_mode_override: DecisionMode | None,
 ) -> tuple[OptimizationConfig, dict[str, ConfigSource]]:
     updates: dict[str, object] = {}
@@ -253,46 +249,22 @@ def _resolve_optimization(
         key = f"optimization.{field}"
         if field == "decision_mode" and decision_mode_override is not None:
             sources[key] = "cli"
-        elif field in optimization_raw:
-            sources[key] = "config"
         else:
-            sources[key] = "default"
+            sources[key] = field_sources.get(key, "default")
     return optimization, sources
 
 
 def _resolve_budget(
     config: SampleConfig,
     *,
-    budget_raw: dict[str, object],
+    field_sources: Mapping[str, ConfigSource],
 ) -> tuple[ExecutionBudgetConfig, dict[str, ConfigSource]]:
     budget = config.execution_budget
     sources: dict[str, ConfigSource] = {}
     for field in ExecutionBudgetConfig.model_fields:
         key = f"execution_budget.{field}"
-        if field in budget_raw:
-            sources[key] = "config"
-        else:
-            sources[key] = "default"
+        sources[key] = field_sources.get(key, "default")
     return budget, sources
-
-
-def _load_raw_mapping(path: Path) -> dict[str, object]:
-    try:
-        data = yaml.safe_load(path.read_text())
-    except (OSError, yaml.YAMLError) as exc:
-        raise InputValidationError(f"Unable to read runtime configuration: {path}: {exc}") from exc
-    if not isinstance(data, dict):
-        raise InputValidationError(f"Runtime configuration must be a YAML mapping: {path}")
-    return cast(dict[str, object], data)
-
-
-def _nested_mapping(data: dict[str, object], key: str) -> dict[str, object]:
-    value = data.get(key)
-    if value is None:
-        return {}
-    if not isinstance(value, dict):
-        raise InputValidationError(f"Configuration field `{key}` must be a mapping")
-    return cast(dict[str, object], value)
 
 
 def _atomic_json(path: Path, payload: object) -> None:

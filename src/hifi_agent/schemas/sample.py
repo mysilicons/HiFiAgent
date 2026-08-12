@@ -116,6 +116,7 @@ class ToolchainConfig(BaseModel):
 
     executable_overrides: dict[ToolName, Path] = Field(default_factory=dict)
     busco_lineage_dir: Path | None = None
+    download_missing_busco: bool = False
     coverage_backend: Literal["auto", "mosdepth", "bedtools"] = "auto"
 
     @field_validator("executable_overrides")
@@ -157,6 +158,15 @@ class MappingQcConfig(BaseModel):
     coverage_window_size: int = Field(default=10_000, ge=100)
 
 
+class RuntimeBehaviorConfig(BaseModel):
+    """Operator-facing recovery and post-verification retention behavior."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    resume_mode: Literal["explicit", "auto"] = "explicit"
+    retention: Literal["full", "standard"] = "full"
+
+
 class SampleConfig(BaseModel):
     """Validated single-sample production configuration."""
 
@@ -181,6 +191,7 @@ class SampleConfig(BaseModel):
     tools: ToolchainConfig = Field(default_factory=ToolchainConfig)
     kmer: KmerConfig = Field(default_factory=KmerConfig)
     mapping_qc: MappingQcConfig = Field(default_factory=MappingQcConfig)
+    runtime: RuntimeBehaviorConfig = Field(default_factory=RuntimeBehaviorConfig)
 
     @field_validator("sample_id")
     @classmethod

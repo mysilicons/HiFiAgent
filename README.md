@@ -1,8 +1,8 @@
 # HiFi Agent V3
 
-HiFi Agent V3 是面向单样本 PacBio HiFi 的受约束组装助手。当前代码是原生 V3 实现：只接受
-`schema_id: "hifi-agent"`，只写 canonical V3 run，不包含旧版本控制器、Schema、迁移器、导出器或
-兼容执行入口。
+HiFi Agent V3 是面向单样本 PacBio HiFi 的受约束组装助手。公开运行配置由严格分离的
+`hifi-agent-sample` 物种文件与 `hifi-agent-runtime` 全局环境文件组成，解析后冻结为内部 canonical
+run；项目不包含旧版本控制器、Schema、迁移器、导出器或兼容执行入口。
 
 当前已实现并严格验收阶段 0～9，阶段 10 发布门禁正在执行：
 
@@ -49,62 +49,93 @@ python scripts/run_portable_demo.py --workspace /tmp/hifi-agent-portable --scena
 ## Drosophila 真实验收
 
 阶段 9 已提供 `configs/drosophila_real_acceptance.yaml`、版本化 dataset registry、真实 run
-verifier、release-only pytest suite、live provider smoke 和 evidence builder。配置通过
-`HIFI_AGENT_DATA_ROOT` 定位未提交 Git 的 34.9 GB FASTQ，固定使用 128 线程并把内存上限设为
-960 GB。完整的预下载、启动、恢复、日志和最终验收命令见
+verifier、release-only pytest suite、live provider smoke 和 evidence builder。当前配置通过共享的
+`configs/runtime.yaml` 定位 `Data/`、`results/` 和缓存目录，固定使用 128 线程并把内存上限设为
+960 GB。完整的历史验收记录见
 [阶段 9 验收报告](docs/v3/stage9_acceptance.md)。run3 已在 clean commit 上完成真实 baseline、单变量
 candidate、同源 post-QC、comparison、live API、0-skip real suite 和 evidence bundle；deep/real verifier
 均为 PASS，科学结论为 `KEEP_INCUMBENT / STOP_PLATEAU`。这证明当前受限搜索空间内的真实闭环和审计
 链有效，不构成全局参数最优性声明。
 
-## 配置示例：
+## 两层配置
+
+运行参数只维护一次，放在全局环境配置中。路径均相对于该文件解析：
 
 ```yaml
-schema_id: "hifi-agent"
-sample_id: candida
-read_technology: pacbio_hifi
-hifi_reads:
-  - /absolute/path/reads.fastq.gz
-outdir: /absolute/path/results/candida
+schema_id: hifi-agent-runtime
+paths:
+  data_root: ../Data
+  output_root: ../results
+  cache_root: ../cache/hifi-agent
 
 resources:
-  max_threads: 32
-  max_memory_gb: 128
+  max_threads: 128
+  max_memory_gb: 960
 
 optimization:
   enabled: true
-  max_rounds: 3
+  max_rounds: 1
   max_candidates_per_round: 1
+  minimum_candidate_runs: 1
   max_parameter_changes_per_candidate: 1
   decision_mode: rules_only
   require_llm: false
   retain_all_attempts: true
 
 execution_budget:
-  max_total_assemblies: 4
+  max_total_assemblies: 2
   max_tool_retries: 1
-  max_cpu_hours: 1000
-  max_walltime_hours: 168
-  min_free_disk_gib: 100
-  max_llm_calls_per_round: 1
-  max_total_llm_calls: 3
+  max_cpu_hours: 30000
+  max_walltime_hours: 336
+  min_free_disk_gib: 1000
+  max_llm_calls_per_round: 0
+  max_total_llm_calls: 0
+
+tools:
+  busco_cache: busco
+  coverage_backend: bedtools
+  download_missing_busco: true
+
+runtime:
+  resume_mode: auto
+  retention: standard
 ```
 
-`examples/candida_sample_config.yaml` 提供仓库内示例。`plan` 是只读操作，不创建 run：
+每个物种文件只保存输入和科学元数据；输入路径必须是 `data_root` 下的安全相对路径：
+
+```yaml
+schema_id: hifi-agent-sample
+runtime_config: ../runtime.yaml
+sample_id: Malus_domestica
+read_technology: pacbio_hifi
+hifi_reads:
+  - Malus_domestica/Malus_domestica_HiFi.fastq
+species_name: Malus domestica
+expected_genome_size: 650000000
+ploidy: 2
+busco_lineage: eudicots_odb12
+```
+
+仓库已提供四个物种配置和 `examples/candida_sample_config.yaml`。`plan` 是只读操作，不创建 run：
 
 ```bash
-hifi-agent plan examples/candida_sample_config.yaml
+hifi-agent plan configs/samples/Malus_domestica.yaml
 ```
+
+正式运行只需同一个入口。首次执行会新建 run；中断后再次执行同一条命令会自动校验 identity、输入
+checksum 和状态日志并续跑。缺失的 BUSCO lineage 会下载到共享缓存。`retention: standard` 只在深度
+验收 `PASS` 且进入终态后删除可再生的 workflow work 目录，保留 assembly、QC、参数、日志和审计证据。
 
 ## 命令
 
 ```bash
-hifi-agent validate sample.yaml
-hifi-agent plan sample.yaml --decision-mode rules_only
-hifi-agent assemble sample.yaml --decision-mode rules_only
-hifi-agent assemble sample.yaml --decision-mode rules_only --resume
+hifi-agent validate configs/samples/Malus_domestica.yaml
+hifi-agent plan configs/samples/Malus_domestica.yaml
+hifi-agent assemble configs/samples/Malus_domestica.yaml
 hifi-agent verify-run /path/to/results/sample --deep
 ```
+
+`--resume` 仍可用于全局策略设为 `explicit` 的高级场景；默认共享配置不需要该参数。
 
 决策模式为 `rules_only`、`llm_disabled` 或 `hybrid`。只有 `hybrid` 可使用 LLM，且
 `require_llm: true` 只允许与 `hybrid` 同时配置。在线 API key 只从环境变量读取，不写入 run、日志或

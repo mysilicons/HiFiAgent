@@ -87,6 +87,16 @@ class IdentityStore:
         identity = self.load()
         checks = (
             (
+                "sample_config_sha256",
+                self.metadata_dir / "sample_config_snapshot.yaml",
+                identity.sample_config_sha256,
+            ),
+            (
+                "runtime_config_sha256",
+                self.metadata_dir / "runtime_config_snapshot.yaml",
+                identity.runtime_config_sha256,
+            ),
+            (
                 "config_sha256",
                 resolved_config or self.metadata_dir / "resolved_config.yaml",
                 identity.config_sha256,
@@ -114,6 +124,8 @@ class IdentityStore:
         )
         drift: list[IdentityDriftItem] = []
         for field, path, expected in checks:
+            if expected is None:
+                continue
             item = _check_snapshot(field, path, expected)
             if item is not None:
                 drift.append(item)

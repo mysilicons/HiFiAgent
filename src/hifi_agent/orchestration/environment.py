@@ -176,13 +176,19 @@ def run_environment_preflight(
         errors.append("UNSAFE_OUTDIR_ROOT")
     lineage = config.tools.busco_lineage_dir
     lineage_record: BuscoLineageRecord | None = None
-    if lineage is not None and not lineage.is_dir():
-        errors.append("BUSCO_LINEAGE_DIR_NOT_FOUND")
+    if config.busco_lineage and lineage is not None and not lineage.is_dir():
+        if config.tools.download_missing_busco:
+            warnings.append("BUSCO_LINEAGE_DOWNLOAD_PENDING")
+        else:
+            errors.append("BUSCO_LINEAGE_DIR_NOT_FOUND")
     elif config.busco_lineage and lineage is not None:
         dataset = _busco_dataset_path(lineage, config.busco_lineage)
         dataset_config = dataset / "dataset.cfg" if dataset is not None else None
         if dataset is None or dataset_config is None or not dataset_config.is_file():
-            errors.append("BUSCO_LINEAGE_DATASET_NOT_FOUND")
+            if config.tools.download_missing_busco:
+                warnings.append("BUSCO_LINEAGE_DOWNLOAD_PENDING")
+            else:
+                errors.append("BUSCO_LINEAGE_DATASET_NOT_FOUND")
         else:
             try:
                 metadata = _parse_busco_dataset_config(dataset_config)

@@ -21,7 +21,7 @@ from hifi_agent.orchestration.environment import (
     require_environment_preflight,
     run_environment_preflight,
 )
-from hifi_agent.orchestration.runtime_config import resolve_runtime_config
+from hifi_agent.orchestration.runtime_config import DecisionMode, resolve_runtime_config
 from hifi_agent.orchestration.verifier import require_verification_success, verify_run
 from hifi_agent.reporting.models import FinalSummary
 
@@ -65,7 +65,7 @@ def abort_with_error(error: HiFiAgentError) -> NoReturn:
 
 @app.command()
 def validate(
-    config: Annotated[Path, typer.Argument(help="Sample YAML file.")],
+    config: Annotated[Path, typer.Argument(help="Species/sample YAML file.")],
 ) -> None:
     """Validate inputs and materialize metadata receipts."""
     try:
@@ -81,7 +81,7 @@ def validate(
 
 @app.command()
 def plan(
-    config: Annotated[Path, typer.Argument(help="Sample YAML file.")],
+    config: Annotated[Path, typer.Argument(help="Species/sample YAML file.")],
     decision_mode: Annotated[
         Literal["rules_only", "hybrid", "llm_disabled"] | None,
         typer.Option("--decision-mode", help="Advanced: audited decision-mode override."),
@@ -107,10 +107,13 @@ def plan(
 
 @app.command()
 def assemble(
-    config: Annotated[Path, typer.Argument(help="Sample YAML file.")],
+    config: Annotated[Path, typer.Argument(help="Species/sample YAML file.")],
     resume: Annotated[
         bool,
-        typer.Option("--resume", help="Resume an interrupted attempt in its existing cache."),
+        typer.Option(
+            "--resume",
+            help="Advanced: force resume when the shared runtime uses explicit mode.",
+        ),
     ] = False,
     decision_mode: Annotated[
         Literal["rules_only", "hybrid", "llm_disabled"] | None,
@@ -132,7 +135,7 @@ def assemble(
             confirm_medium_high_risk=confirm_medium_high_risk,
         ).run(resume=resume)
     except HiFiAgentError as exc:
-        if not resume:
+        if not resume and not _configured_identity_exists(config, decision_mode):
             write_bootstrap_failure(config, exc, stage="CONTROLLER_BOOTSTRAP")
         abort_with_error(exc)
     console = get_console()
@@ -150,6 +153,19 @@ def assemble(
     exit_code = FinalSummary.model_validate_json(summary).process_exit_code
     if exit_code:
         raise typer.Exit(code=exit_code)
+
+
+def _configured_identity_exists(config: Path, decision_mode: DecisionMode | None) -> bool:
+    """Avoid writing bootstrap diagnostics into an already identified auto-resume run."""
+    try:
+        runtime = resolve_runtime_config(
+            config,
+            decision_mode_override=decision_mode,
+            write_outputs=False,
+        )
+    except HiFiAgentError:
+        return False
+    return (runtime.effective.sample.outdir / "00_metadata/run_identity.json").is_file()
 
 
 @app.command("verify-run")

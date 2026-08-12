@@ -215,6 +215,27 @@ def test_offline_busco_lineage_is_required_and_checksum_bound(tmp_path: Path) ->
     assert "BUSCO_LINEAGE_DATASET_NOT_FOUND" in failed.errors
 
 
+def test_missing_downloadable_busco_lineage_is_a_preparation_warning(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    configured = config.model_copy(
+        update={
+            "busco_lineage": "diptera_odb12",
+            "tools": config.tools.model_copy(
+                update={
+                    "busco_lineage_dir": tmp_path / "busco-cache",
+                    "download_missing_busco": True,
+                }
+            ),
+        }
+    )
+
+    manifest = run_environment_preflight(configured, resolver=_resolver, runner=_runner)
+
+    assert manifest.status == "WARNING"
+    assert manifest.errors == []
+    assert "BUSCO_LINEAGE_DOWNLOAD_PENDING" in manifest.warnings
+
+
 def test_subprocess_pythonpath_is_repository_controlled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

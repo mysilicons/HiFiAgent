@@ -12,6 +12,7 @@ from hifi_agent.schemas.sample import (
     KmerConfig,
     OptimizationConfig,
     ResourceConfig,
+    RuntimeBehaviorConfig,
     SampleConfig,
     ToolchainConfig,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "OptimizationConfig",
     "ParameterName",
     "ResourceConfig",
+    "RuntimeBehaviorConfig",
     "SampleConfig",
     "ToolchainConfig",
     "baseline_assembly_config",

@@ -50,6 +50,8 @@ class RunIdentity(BaseModel):
     created_at: datetime
     code_commit: str
     package_version: str
+    sample_config_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    runtime_config_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     config_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     effective_config_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     input_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -71,6 +73,8 @@ class RunIdentity(BaseModel):
         environment_manifest: Path,
         comparison_policy: Path,
         rag_index: Path | None = None,
+        sample_config: Path | None = None,
+        runtime_config: Path | None = None,
     ) -> RunIdentity:
         """Hash all immutable snapshots and create a fresh run UUID."""
         return cls(
@@ -80,6 +84,12 @@ class RunIdentity(BaseModel):
             created_at=datetime.now(UTC),
             code_commit=code_commit,
             package_version=package_version,
+            sample_config_sha256=(
+                sha256_file(sample_config) if sample_config is not None else None
+            ),
+            runtime_config_sha256=(
+                sha256_file(runtime_config) if runtime_config is not None else None
+            ),
             config_sha256=sha256_file(config),
             effective_config_sha256=sha256_file(effective_config),
             input_manifest_sha256=sha256_file(input_manifest),

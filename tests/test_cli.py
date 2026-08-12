@@ -10,6 +10,7 @@ import hifi_agent.cli
 from hifi_agent.cli import app
 from hifi_agent.constants import ExitCode, __version__
 from hifi_agent.exceptions import AgentStateError
+from hifi_agent.orchestration.bootstrap import write_bootstrap_failure
 from hifi_agent.orchestration.runtime_models import RunPhase
 from hifi_agent.reporting.models import FinalSummary
 
@@ -159,3 +160,41 @@ def test_cli_uses_documented_failure_exit_code(
     result = runner.invoke(app, ["assemble", str(config)])
     assert result.exit_code == ExitCode.INTERNAL_ERROR
     assert "corrupt state" in result.output
+
+
+def test_split_config_bootstrap_failure_uses_runtime_output_root(tmp_path: Path) -> None:
+    config_root = tmp_path / "configs"
+    sample_root = config_root / "samples"
+    sample_root.mkdir(parents=True)
+    runtime = config_root / "runtime.yaml"
+    runtime.write_text(
+        yaml.safe_dump(
+            {
+                "schema_id": "hifi-agent-runtime",
+                "paths": {
+                    "data_root": "../Data",
+                    "output_root": "../results",
+                    "cache_root": "../cache",
+                },
+            }
+        )
+    )
+    sample = sample_root / "apple.yaml"
+    sample.write_text(
+        yaml.safe_dump(
+            {
+                "schema_id": "hifi-agent-sample",
+                "runtime_config": "../runtime.yaml",
+                "sample_id": "apple",
+            }
+        )
+    )
+
+    receipt = write_bootstrap_failure(
+        sample,
+        AgentStateError("fixture bootstrap failure"),
+        stage="CONTROLLER_BOOTSTRAP",
+    )
+
+    assert receipt == tmp_path / "results/apple/00_metadata/bootstrap_failure.json"
+    assert receipt.is_file()

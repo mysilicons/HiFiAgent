@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -68,11 +70,41 @@ def _infer_metadata_dir(config_path: Path) -> Path | None:
         payload = yaml.safe_load(config_path.read_text())
     except (OSError, yaml.YAMLError):
         return None
-    if not isinstance(payload, dict) or not isinstance(payload.get("outdir"), str):
+    if not isinstance(payload, Mapping):
         return None
-    outdir = Path(payload["outdir"])
-    if not outdir.is_absolute():
-        outdir = config_path.parent / outdir
+    outdir_value = payload.get("outdir")
+    if isinstance(outdir_value, str):
+        outdir = Path(outdir_value)
+        if not outdir.is_absolute():
+            outdir = config_path.parent / outdir
+        return _safe_metadata_dir(outdir)
+    if payload.get("schema_id") != "hifi-agent-sample":
+        return None
+    runtime_value = payload.get("runtime_config")
+    sample_id = payload.get("output_name") or payload.get("sample_id")
+    if not isinstance(runtime_value, str) or not isinstance(sample_id, str):
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", sample_id):
+        return None
+    runtime_path = Path(runtime_value)
+    if not runtime_path.is_absolute():
+        runtime_path = config_path.parent / runtime_path
+    try:
+        runtime = yaml.safe_load(runtime_path.read_text())
+    except (OSError, yaml.YAMLError):
+        return None
+    if not isinstance(runtime, Mapping):
+        return None
+    paths = runtime.get("paths")
+    if not isinstance(paths, Mapping) or not isinstance(paths.get("output_root"), str):
+        return None
+    output_root = Path(paths["output_root"])
+    if not output_root.is_absolute():
+        output_root = runtime_path.parent / output_root
+    return _safe_metadata_dir(output_root / sample_id)
+
+
+def _safe_metadata_dir(outdir: Path) -> Path | None:
     resolved = outdir.resolve()
     if resolved == Path(resolved.anchor):
         return None

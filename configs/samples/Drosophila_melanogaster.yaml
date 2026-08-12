@@ -1,7 +1,6 @@
 schema_id: hifi-agent-sample
-runtime_config: runtime.yaml
+runtime_config: ../runtime.yaml
 sample_id: Drosophila_melanogaster
-output_name: Drosophila_melanogaster_release_acceptance
 read_technology: pacbio_hifi
 hifi_reads:
   - Drosophila_melanogaster/Drosophila_melanogaster_HiFi.fastq
