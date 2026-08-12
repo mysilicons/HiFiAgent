@@ -6,10 +6,10 @@
 
 从 FASTQ 到组装、质量评估、有限参数优化和终态报告：一个样本配置，一条运行命令。
 
-[![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?logo=githubactions&logoColor=white)](https://github.com/mysilicons/HiFiAgent/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/badge/Release-v3.0.0-2ea44f)](https://github.com/mysilicons/HiFiAgent/releases/tag/v3.0.0)
+[![CI](https://github.com/mysilicons/HiFiAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/mysilicons/HiFiAgent/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/mysilicons/HiFiAgent?display_name=tag&sort=semver)](https://github.com/mysilicons/HiFiAgent/releases/latest)
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License](https://img.shields.io/github/license/mysilicons/HiFiAgent)](LICENSE)
 
 [快速开始](#快速开始) · [配置](#两层配置) · [结果验收](#结果与验收) · [文档](#文档) · [贡献](CONTRIBUTING.md)
 

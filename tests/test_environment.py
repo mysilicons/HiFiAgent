@@ -31,6 +31,7 @@ def _config(
                 "read_technology": "pacbio_hifi",
                 "hifi_reads": [str(reads)],
                 "outdir": str(tmp_path / "run"),
+                "resources": {"max_threads": 1, "max_memory_gb": 1},
                 "execution_budget": {"min_free_disk_gib": 0},
                 "tools": {"executable_overrides": override or {}},
             }
